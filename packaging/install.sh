@@ -21,6 +21,14 @@ install -Dm644 "$ROOT/packaging/systemd/omarcal-daemon.service" "$HOME/.config/s
 # Point desktop entry at local bin
 sed -i "s|^Exec=omarcal|Exec=$HOME/.local/bin/omarcal|" "$HOME/.local/share/applications/omarcal.desktop"
 
+# Refresh MIME / desktop databases and make Omarcal the .ics handler
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true
+fi
+if command -v xdg-mime >/dev/null 2>&1; then
+  xdg-mime default omarcal.desktop text/calendar || true
+fi
+
 echo ""
 echo "Installed:"
 echo "  ~/.local/bin/omarcal"

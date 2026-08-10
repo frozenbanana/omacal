@@ -16,10 +16,13 @@ import "./App.css";
 import {
   bootListeners,
   deleteEvent,
+  previewIcs,
   respondInvite,
   saveEvent,
+  takePendingImports,
   useApp,
   type CalEvent,
+  type ImportPreview,
 } from "./store";
 import { EventEditor } from "./components/EventEditor";
 import { SettingsModal } from "./components/SettingsModal";
@@ -83,6 +86,11 @@ export default function App() {
     setShowEditor,
     editorDraft,
     setEditorDraft,
+    editorTitle,
+    setEditorTitle,
+    setPendingImport,
+    pendingImport,
+    importError,
     search,
     setSearch,
     searchResults,
@@ -98,8 +106,27 @@ export default function App() {
   const [rsvpBusyId, setRsvpBusyId] = useState<number | null>(null);
 
   useEffect(() => {
-    bootListeners().then(load);
+    bootListeners().then(async () => {
+      await load();
+      // cold-start import (app launched via file association before listeners existed)
+      const paths = await takePendingImports();
+      for (const p of paths) {
+        try {
+          const preview = await previewIcs(p);
+          openImport(preview);
+        } catch (e) {
+          useApp.setState({ error: String(e) });
+        }
+      }
+    });
   }, [load]);
+
+  useEffect(() => {
+    if (pendingImport) {
+      openImport(pendingImport);
+      setPendingImport(null);
+    }
+  }, [pendingImport]);
 
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
@@ -238,6 +265,7 @@ export default function App() {
     }
     const s = start || new Date();
     const e = end || new Date(s.getTime() + 60 * 60 * 1000);
+    setEditorTitle(undefined);
     setEditorDraft({
       calendar_id: firstWritable.id,
       summary: "",
@@ -259,6 +287,7 @@ export default function App() {
 
   function openEdit(ev: CalEvent) {
     const baseUid = ev.uid.includes("::") ? ev.uid.split("::")[0] : ev.uid;
+    setEditorTitle(undefined);
     setEditorDraft({
       id: ev.id,
       calendar_id: ev.calendar_id,
@@ -278,6 +307,44 @@ export default function App() {
     });
     setShowEditor(true);
   }
+
+  // Prefill the editor from an imported .ics, then let the user pick a calendar and save.
+  function openImport(preview: ImportPreview) {
+    const s = useApp.getState();
+    const subscribed = s.calendars.filter((c) => c.subscribed !== false);
+    const defaultCal =
+      s.defaultCalendarId != null
+        ? subscribed.find(
+            (c) => c.id === s.defaultCalendarId && c.visible && !c.readonly,
+          )
+        : undefined;
+    const target =
+      defaultCal ||
+      subscribed.find((c) => c.visible && !c.readonly) ||
+      subscribed.find((c) => !c.readonly) ||
+      subscribed[0];
+    if (!target) {
+      setShowSettings(true);
+      return;
+    }
+    setEditorTitle("Import event");
+    setEditorDraft({
+      calendar_id: target.id,
+      // no uid: always create a fresh event on import
+      summary: preview.summary,
+      description: preview.description,
+      location: preview.location,
+      dtstart: preview.dtstart || "",
+      dtend: preview.dtend || preview.dtstart || "",
+      all_day: preview.all_day,
+      timezone: s.config?.locale.timezone || "Europe/Stockholm",
+      rrule: preview.rrule || null,
+      alarms: preview.alarms?.length ? preview.alarms : [{ trigger: "-PT15M" }],
+      attendees: preview.attendees || [],
+    });
+    setShowEditor(true);
+  }
+
 
   async function onSelect(sel: DateSelectArg) {
     openNew(sel.start, sel.end, sel.allDay);
@@ -408,6 +475,7 @@ export default function App() {
           <button onClick={() => setShowSettings(true)}>Accounts</button>
         </div>
         {error && <div className="error">{error}</div>}
+        {importError && <div className="error">{importError}</div>}
         <div className="calendar-wrap">
           <FullCalendar
             ref={calRef}
@@ -476,6 +544,7 @@ export default function App() {
           draft={editorDraft}
           calendars={calendars.filter((c) => c.subscribed !== false)}
           timezone={config?.locale.timezone || "Europe/Stockholm"}
+          title={editorTitle}
           onClose={() => setShowEditor(false)}
           onSave={async (input) => {
             await saveEvent(input);

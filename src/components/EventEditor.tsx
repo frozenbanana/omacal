@@ -5,11 +5,12 @@ type Props = {
   draft: Partial<EventInput> & { id?: number };
   calendars: Calendar[];
   timezone: string;
+  title?: string;
   onClose: () => void;
   onSave: (input: EventInput) => Promise<void>;
 };
 
-export function EventEditor({ draft, calendars, timezone, onClose, onSave }: Props) {
+export function EventEditor({ draft, calendars, timezone, title, onClose, onSave }: Props) {
   const [summary, setSummary] = useState(draft.summary || "");
   const [description, setDescription] = useState(draft.description || "");
   const [location, setLocation] = useState(draft.location || "");
@@ -75,7 +76,7 @@ export function EventEditor({ draft, calendars, timezone, onClose, onSave }: Pro
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
       >
-        <h2>{draft.uid ? "Edit event" : "New event"}</h2>
+        <h2>{title ?? (draft.uid ? "Edit event" : "New event")}</h2>
         <div className="form-grid">
           <label>
             Title

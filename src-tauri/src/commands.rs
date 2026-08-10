@@ -5,13 +5,14 @@ use crate::secrets;
 use crate::sync::{SyncEngine, SyncReport};
 use crate::theme::{self, ThemeColors};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::State;
 use uuid::Uuid;
 
 pub struct AppState {
     pub db: Arc<Db>,
     pub sync: SyncEngine,
+    pub pending_imports: Arc<Mutex<Vec<String>>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -215,6 +216,54 @@ pub struct AddAccountRequest {
     pub username: String,
     pub password: String,
     pub addresses: Vec<String>,
+}
+
+/// Info extracted from an imported .ics file so the UI can prefill the editor.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportPreview {
+    pub summary: String,
+    pub description: String,
+    pub location: String,
+    pub dtstart: Option<String>,
+    pub dtend: Option<String>,
+    pub all_day: bool,
+    pub rrule: Option<String>,
+    pub alarms: Vec<AlarmInfo>,
+    pub attendees: Vec<AttendeeInfo>,
+}
+
+#[tauri::command]
+pub async fn preview_ics(path: String) -> Result<ImportPreview, String> {
+    let p = path;
+    let p = if let Some(rest) = p.strip_prefix("file://") {
+        percent_encoding::percent_decode_str(rest)
+            .decode_utf8_lossy()
+            .into_owned()
+    } else {
+        p
+    };
+    let raw = std::fs::read_to_string(&p).map_err(|_| format!("could not read {p}"))?;
+    let parsed = ics::preview_from_ics(&raw).ok_or_else(|| "not a valid .ics event file".to_string())?;
+    Ok(ImportPreview {
+        summary: parsed.summary,
+        description: parsed.description,
+        location: parsed.location,
+        dtstart: parsed.dtstart,
+        dtend: parsed.dtend,
+        all_day: parsed.all_day,
+        rrule: parsed.rrule,
+        alarms: parsed.alarms,
+        attendees: parsed.attendees,
+    })
+}
+
+#[tauri::command]
+pub fn take_pending_imports(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let mut q = state
+        .pending_imports
+        .lock()
+        .map_err(|_| "import queue lock poisoned".to_string())?;
+    Ok(std::mem::take(&mut *q))
 }
 
 #[tauri::command]

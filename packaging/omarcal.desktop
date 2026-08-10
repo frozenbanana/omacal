@@ -1,10 +1,11 @@
 [Desktop Entry]
 Name=Omarcal
 Comment=Omarchy-native CalDAV calendar
-Exec=omarcal
+Exec=omarcal %U
 Icon=omarcal
 Terminal=false
 Type=Application
 Categories=Office;Calendar;
 Keywords=calendar;caldav;nextcloud;omarchy;
 StartupWMClass=omarcal
+MimeType=text/calendar;

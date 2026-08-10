@@ -100,6 +100,18 @@ export type EventInput = {
   etag?: string | null;
 };
 
+export type ImportPreview = {
+  summary: string;
+  description: string;
+  location: string;
+  dtstart?: string | null;
+  dtend?: string | null;
+  all_day: boolean;
+  rrule?: string | null;
+  alarms: Alarm[];
+  attendees: Attendee[];
+};
+
 type Store = {
   ready: boolean;
   syncing: boolean;
@@ -117,6 +129,9 @@ type Store = {
   showSettings: boolean;
   showEditor: boolean;
   editorDraft?: Partial<EventInput> & { id?: number };
+  editorTitle?: string;
+  pendingImport?: ImportPreview | null;
+  importError?: string | null;
   search: string;
   searchResults: CalEvent[];
   load: () => Promise<void>;
@@ -126,6 +141,9 @@ type Store = {
   setShowSettings: (v: boolean) => void;
   setShowEditor: (v: boolean) => void;
   setEditorDraft: (d: Store["editorDraft"]) => void;
+  setEditorTitle: (t?: string) => void;
+  setPendingImport: (p: ImportPreview | null) => void;
+  setImportError: (e: string | null) => void;
   toggleCalendar: (id: number, visible: boolean) => Promise<void>;
   setCalendarColor: (id: number, color: string) => Promise<void>;
   setDefaultCalendar: (id: number | null) => Promise<void>;
@@ -160,6 +178,8 @@ export const useApp = create<Store>((set, get) => ({
   selected: null,
   showSettings: false,
   showEditor: false,
+  pendingImport: null,
+  importError: null,
   search: "",
   searchResults: [],
 
@@ -216,6 +236,9 @@ export const useApp = create<Store>((set, get) => ({
   setShowSettings: (v) => set({ showSettings: v }),
   setShowEditor: (v) => set({ showEditor: v }),
   setEditorDraft: (d) => set({ editorDraft: d }),
+  setEditorTitle: (t) => set({ editorTitle: t }),
+  setPendingImport: (p) => set({ pendingImport: p }),
+  setImportError: (e) => set({ importError: e }),
 
   toggleCalendar: async (id, visible) => {
     await invoke("set_calendar_visible", { id, visible });
@@ -270,10 +293,27 @@ export async function bootListeners() {
   await listen("alarm-fired", () => {
     // could toast; notifications already shown via mako
   });
+  await listen<string>("import-ics", async (ev) => {
+    try {
+      const preview = await previewIcs(ev.payload);
+      useApp.getState().setImportError(null);
+      useApp.getState().setPendingImport(preview);
+    } catch (e) {
+      useApp.getState().setImportError(String(e));
+    }
+  });
 }
 
 export async function saveEvent(input: EventInput) {
   return invoke<CalEvent>("save_event", { input });
+}
+
+export async function previewIcs(path: string): Promise<ImportPreview> {
+  return invoke<ImportPreview>("preview_ics", { path });
+}
+
+export async function takePendingImports(): Promise<string[]> {
+  return invoke<string[]>("take_pending_imports");
 }
 
 export async function deleteEvent(id: number) {

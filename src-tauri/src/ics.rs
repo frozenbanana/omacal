@@ -47,7 +47,6 @@ pub fn parse_ics(raw: &str, my_addresses: &[String]) -> Option<ParsedEvent> {
         CalendarComponent::Event(e) => Some(e),
         _ => None,
     })?;
-
     let uid = event
         .get_uid()
         .map(|s| s.to_string())
@@ -95,6 +94,11 @@ pub fn parse_ics(raw: &str, my_addresses: &[String]) -> Option<ParsedEvent> {
         my_partstat,
         raw_ics: raw.to_string(),
     })
+}
+
+/// Lightweight parse for .ics imports (no attendee matching needed).
+pub fn preview_from_ics(raw: &str) -> Option<ParsedEvent> {
+    parse_ics(raw, &[])
 }
 
 fn emails_equal(a: &str, b: &str) -> bool {
@@ -685,7 +689,47 @@ pub fn default_href_for_uid(calendar_href: &str, uid: &str) -> String {
     format!("{base}/{uid}.ics")
 }
 
-#[cfg(test)]
+    #[test]
+    fn preview_import_parses_event_fields() {
+        const ICS: &str = "BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:import-1\r\n\
+DTSTAMP:20260801T120000Z\r\n\
+DTSTART:20260914T090000\r\n\
+DTEND:20260914T100000\r\n\
+SUMMARY:Standup\r\n\
+LOCATION:Meeting room\r\n\
+DESCRIPTION:Daily sync\r\n\
+RRULE:FREQ=WEEKLY;BYDAY=MO,WE\r\n\
+ATTENDEE;CN=Alice;PARTSTAT=NEEDS-ACTION:mailto:alice@example.com\r\n\
+BEGIN:VALARM\r\n\
+TRIGGER:-PT10M\r\n\
+DESCRIPTION:Reminder\r\n\
+ACTION:DISPLAY\r\n\
+END:VALARM\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let p = preview_from_ics(ICS).expect("preview");
+        assert_eq!(p.summary, "Standup");
+        assert_eq!(p.location, "Meeting room");
+        assert_eq!(p.description, "Daily sync");
+        assert_eq!(p.dtstart.as_deref(), Some("2026-09-14T09:00:00+00:00"));
+        assert!(!p.all_day);
+        assert_eq!(
+            p.rrule.as_deref(),
+            Some("FREQ=WEEKLY;BYDAY=MO,WE"),
+            "rrule={:?}",
+            p.rrule
+        );
+        assert_eq!(p.attendees.len(), 1);
+        assert_eq!(p.attendees[0].email, "alice@example.com");
+        assert_eq!(p.alarms.len(), 1);
+        assert_eq!(p.alarms[0].trigger, "-PT10M");
+    }
+
+    #[cfg(test)]
+
 mod tests {
     use super::*;
 

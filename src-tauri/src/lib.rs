@@ -10,13 +10,41 @@ mod theme;
 
 use commands::AppState;
 use db::Db;
-use std::sync::Arc;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 use sync::SyncEngine;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager,
+    AppHandle, Emitter, Manager,
 };
+
+fn ics_arg_from(args: &[String]) -> Option<String> {
+    args.iter()
+        .find(|a| {
+            let lower = a.to_lowercase();
+            (lower.ends_with(".ics") || lower.ends_with(".ical"))
+                && Path::new(a).is_file()
+        })
+        .cloned()
+}
+
+fn queue_import(app: &AppHandle, path: &str) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+    let _ = app.emit("import-ics", path);
+}
+
+fn queue_import_cold(app: &AppHandle, path: &str) {
+    queue_import(app, path);
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut q) = state.pending_imports.lock() {
+            q.push(path.to_string());
+        }
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -50,11 +78,21 @@ pub fn run() {
     let state = AppState {
         db: db.clone(),
         sync,
+        pending_imports: Arc::new(Mutex::new(Vec::new())),
     };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri_plugin_single_instance::Builder::default()
+                .callback(|app, args, _cwd| {
+                    if let Some(path) = ics_arg_from(&args) {
+                        queue_import(&app, &path);
+                    }
+                })
+                .build(),
+        )
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::get_theme,
@@ -80,11 +118,18 @@ pub fn run() {
             commands::respond_invites_bulk,
             commands::next_event,
             commands::freebusy,
+            commands::preview_ics,
+            commands::take_pending_imports,
         ])
         .setup(move |app| {
             theme::start_theme_watcher(app.handle().clone());
             alarms::start_alarm_loop(app.handle().clone(), db.clone());
 
+            // Cold-start launch from a file association (e.g. double-clicked .ics)
+            let args: Vec<String> = std::env::args().collect();
+            if let Some(path) = ics_arg_from(&args) {
+                queue_import_cold(app.handle(), &path);
+            }
             // background sync loop
             let handle = app.handle().clone();
             let db_sync = db.clone();
