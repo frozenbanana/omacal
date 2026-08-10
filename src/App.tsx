@@ -508,7 +508,7 @@ export default function App() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <div className="brand">
+        <div className="brand" data-tauri-drag-region="deep">
           <h1>Omarcal</h1>
           <p>
             {theme?.name || "omarchy"} · {config?.locale.timezone || "UTC"}
@@ -551,7 +551,7 @@ export default function App() {
       </aside>
 
       <main className="main">
-        <div className="nav-row">
+        <div className="nav-row" data-tauri-drag-region="deep">
           <button
             type="button"
             className="ghost nav-btn"
@@ -572,7 +572,7 @@ export default function App() {
           </button>
           <span className="nav-title">{navTitle}</span>
         </div>
-        <div className="toolbar">
+        <div className="toolbar" data-tauri-drag-region="deep">
           <div className="view-toggle">
             {(
               [
@@ -627,6 +627,18 @@ export default function App() {
             eventDurationEditable
             weekends
             firstDay={config?.locale.week_starts_on ?? 1}
+            views={{
+              timeGridWeek: {
+                weekNumbers: true,
+                weekNumberCalculation: "ISO",
+                weekNumberFormat: { week: "numeric" },
+              },
+              dayGridMonth: {
+                weekNumbers: true,
+                weekNumberCalculation: "ISO",
+                weekNumberFormat: { week: "numeric" },
+              },
+            }}
             slotMinTime="06:00:00"
             slotMaxTime="22:00:00"
             dayMaxEvents

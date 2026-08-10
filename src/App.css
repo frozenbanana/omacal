@@ -722,6 +722,37 @@ button:disabled {
   height: 1.4rem;
 }
 
+/* Week numbers (Month view): quiet pill in the leading edge of each row. */
+.fc .fc-dayGridMonth-view .fc-daygrid-week-number {
+  color: var(--muted);
+  background: transparent;
+  min-width: 0;
+  padding: 0.15rem 0.4rem;
+  top: 0.2rem;
+  left: 0.3rem;
+  font-size: 0.62rem;
+  line-height: 1.2;
+  border-radius: 999px;
+  z-index: 4;
+  text-decoration: none;
+}
+
+.fc .fc-dayGridMonth-view .fc-daygrid-week-number:hover {
+  color: var(--accent);
+}
+
+/* Week numbers (Week view): heading in the time axis gutter. */
+.fc .fc-timegrid .fc-timegrid-axis-cushion {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: transparent;
+}
+
+.fc .fc-timegrid .fc-timegrid-axis-cushion:hover {
+  color: var(--accent);
+}
+
 .fc .fc-dayGridMonth-view .fc-daygrid-day-number {
   padding: 0.18rem 0.35rem;
   font-size: 0.78rem;
