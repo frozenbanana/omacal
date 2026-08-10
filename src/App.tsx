@@ -10,6 +10,8 @@ import type {
   EventContentArg,
   EventDropArg,
   EventInput as FCEventInput,
+  EventMountArg,
+  MoreLinkArg,
 } from "@fullcalendar/core";
 import type { EventResizeDoneArg } from "@fullcalendar/interaction";
 import "./App.css";
@@ -24,11 +26,19 @@ import {
   type CalEvent,
   type ImportPreview,
 } from "./store";
+import {
+  dayKey,
+  eventTimeLabel,
+  getAllDayEventsForDayKey,
+  getTimedEventsForDayKey,
+} from "./eventLayout";
 import { EventEditor } from "./components/EventEditor";
 import { SettingsModal } from "./components/SettingsModal";
 import { EventDetail } from "./components/EventDetail";
 import { CalendarSidebar } from "./components/CalendarSidebar";
 import { InvitesPanel } from "./components/InvitesPanel";
+import { DayPopover, type DayPopoverAnchor } from "./components/DayPopover";
+import { YearView } from "./components/YearView";
 
 function isInvite(e: CalEvent): boolean {
   return e.my_partstat === "NEEDS-ACTION";
@@ -61,7 +71,10 @@ function toFcEvents(events: CalEvent[]): FCEventInput[] {
       backgroundColor: invite ? "transparent" : e.color,
       borderColor: e.color,
       editable: !e.readonly && !invite,
-      classNames: statusClass ? [statusClass] : undefined,
+      classNames: [
+        e.all_day ? "om-allday" : "om-timed",
+        ...(statusClass ? [statusClass] : []),
+      ],
       extendedProps: { calEvent: e, invite },
     };
     return [base];
@@ -104,6 +117,13 @@ export default function App() {
 
   const calRef = useRef<FullCalendar | null>(null);
   const [rsvpBusyId, setRsvpBusyId] = useState<number | null>(null);
+  const [navTitle, setNavTitle] = useState("");
+  const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
+  const [dayPopover, setDayPopover] = useState<{
+    date: Date;
+    events: CalEvent[];
+    anchor: DayPopoverAnchor;
+  } | null>(null);
 
   useEffect(() => {
     bootListeners().then(async () => {
@@ -152,6 +172,15 @@ export default function App() {
 
   const fcEvents = useMemo(() => toFcEvents(events), [events]);
 
+  const visibleEvents = useMemo(() => {
+    const visibleIds = new Set(
+      calendars
+        .filter((c) => c.visible && c.subscribed !== false)
+        .map((c) => c.id),
+    );
+    return events.filter((e) => visibleIds.has(e.calendar_id));
+  }, [events, calendars]);
+
   async function rsvpFromCalendar(ev: CalEvent, partstat: string) {
     if (rsvpBusyId != null) return;
     setRsvpBusyId(ev.id);
@@ -171,13 +200,50 @@ export default function App() {
     const invite = !!arg.event.extendedProps.invite || (calEvent && isInvite(calEvent));
     const color = calEvent?.color || arg.event.borderColor || "var(--accent)";
     const busy = calEvent != null && rsvpBusyId === calEvent.id;
+    const isMonthGrid = arg.view.type === "dayGridMonth";
+    const title = arg.event.title || "(no title)";
+
+    if (isMonthGrid && calEvent && !invite && !arg.event.allDay) {
+      const label = `${arg.timeText ? arg.timeText + ", " : ""}${title}`;
+      return (
+        <div className="om-timed-frame" title={label} aria-label={label}>
+          <span className="om-dot" style={{ background: color }} aria-hidden="true" />
+          {arg.timeText && <span className="om-time">{arg.timeText}</span>}
+          <span className="om-title">{title}</span>
+        </div>
+      );
+    }
+
+    if (isMonthGrid && calEvent && !invite && arg.event.allDay) {
+      const contBefore = !arg.isStart;
+      const contAfter = !arg.isEnd;
+      return (
+        <div
+          className={`om-pill-frame${contBefore ? " om-cont-before" : ""}${contAfter ? " om-cont-after" : ""}`}
+          title={title}
+          aria-label={title}
+        >
+          {contBefore && (
+            <span className="om-cont" aria-hidden="true">
+              ‹
+            </span>
+          )}
+          {arg.isStart && <span className="om-pill-title">{title}</span>}
+          {contAfter && (
+            <span className="om-cont" aria-hidden="true">
+              ›
+            </span>
+          )}
+        </div>
+      );
+    }
 
     if (!invite || !calEvent) {
       return (
         <div className="fc-event-main-frame">
           {arg.timeText && <div className="fc-event-time">{arg.timeText}</div>}
           <div className="fc-event-title-container">
-            <div className="fc-event-title fc-sticky">{arg.event.title}</div>
+            <div className="fc-event-title fc-sticky">{title}</div>
           </div>
         </div>
       );
@@ -190,7 +256,7 @@ export default function App() {
       >
         <div className="fc-invite-main">
           {arg.timeText && <span className="fc-event-time">{arg.timeText}</span>}
-          <span className="fc-event-title">{arg.event.title}</span>
+          <span className="fc-event-title">{title}</span>
           <span className="fc-invite-badge" title="Invitation">
             ?
           </span>
@@ -390,6 +456,51 @@ export default function App() {
     }
   }
 
+  function goToDay(date: Date) {
+    setView("timeGridDay");
+    calRef.current?.getApi().changeView("timeGridDay", date);
+  }
+
+  function goToMonth(date: Date) {
+    setView("dayGridMonth");
+    calRef.current?.getApi().changeView("dayGridMonth", date);
+  }
+
+  function handleEventMount(info: EventMountArg) {
+    const ev = info.event.extendedProps.calEvent as CalEvent | undefined;
+    if (!ev) return;
+    const tz = config?.locale.time_24h ?? true;
+    info.el.setAttribute(
+      "aria-label",
+      ev.all_day ? ev.title : `${eventTimeLabel(ev, tz)}, ${ev.title}`,
+    );
+  }
+
+  function openDayPopover(arg: MoreLinkArg) {
+    const t = arg.jsEvent.currentTarget as HTMLElement | null;
+    const r = t?.getBoundingClientRect();
+    const anchor: DayPopoverAnchor = r
+      ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
+      : { left: 0, top: 0, right: 0, bottom: 0 };
+    const key = dayKey(arg.date);
+    const timed = getTimedEventsForDayKey(visibleEvents, key).slice().sort((a, b) =>
+      (a.start || "").localeCompare(b.start || ""),
+    );
+    const allDay = getAllDayEventsForDayKey(visibleEvents, key).slice().sort((a, b) =>
+      (a.start || "").localeCompare(b.start || ""),
+    );
+    setDayPopover({ date: arg.date, events: [...allDay, ...timed], anchor });
+    // Truthy non-string return: suppress FullCalendar's built-in popover + nav.
+    return true as unknown as string;
+  }
+
+  function navPrev() {
+    calRef.current?.getApi().prev();
+  }
+  function navNext() {
+    calRef.current?.getApi().next();
+  }
+
   if (!ready) {
     return <div className="app" style={{ placeItems: "center", display: "grid" }}>Loading…</div>;
   }
@@ -440,6 +551,27 @@ export default function App() {
       </aside>
 
       <main className="main">
+        <div className="nav-row">
+          <button
+            type="button"
+            className="ghost nav-btn"
+            onClick={navPrev}
+            aria-label="Previous"
+            title="Previous"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            className="ghost nav-btn"
+            onClick={navNext}
+            aria-label="Next"
+            title="Next"
+          >
+            ›
+          </button>
+          <span className="nav-title">{navTitle}</span>
+        </div>
         <div className="toolbar">
           <div className="view-toggle">
             {(
@@ -486,11 +618,7 @@ export default function App() {
               interactionPlugin,
             ]}
             initialView={view}
-            headerToolbar={{
-              left: "prev,next",
-              center: "title",
-              right: "",
-            }}
+            headerToolbar={false}
             height="100%"
             nowIndicator
             selectable
@@ -501,18 +629,35 @@ export default function App() {
             firstDay={config?.locale.week_starts_on ?? 1}
             slotMinTime="06:00:00"
             slotMaxTime="22:00:00"
+            dayMaxEvents
+            moreLinkClick={openDayPopover}
             eventTimeFormat={{
               hour: "2-digit",
               minute: "2-digit",
               hour12: !(config?.locale.time_24h ?? true),
             }}
-            events={fcEvents}
+            events={view === "multiMonthYear" ? [] : fcEvents}
             eventContent={renderEventContent}
+            eventDidMount={handleEventMount}
+            datesSet={(info) => {
+              setNavTitle(info.view.title);
+              setCurrentDate(info.start);
+            }}
             select={onSelect}
             eventClick={onEventClick}
             eventDrop={persistMove}
             eventResize={persistMove}
           />
+          {view === "multiMonthYear" && (
+            <YearView
+              year={currentDate.getFullYear()}
+              events={visibleEvents}
+              today={new Date()}
+              weekStartsOn={config?.locale.week_starts_on ?? 1}
+              onSelectDay={goToDay}
+              onSelectMonth={goToMonth}
+            />
+          )}
         </div>
       </main>
 
@@ -535,6 +680,20 @@ export default function App() {
               .events.find((e) => e.id === selected.id);
             if (next) setSelected(next);
             else setSelected(null);
+          }}
+        />
+      )}
+
+      {dayPopover && (
+        <DayPopover
+          date={dayPopover.date}
+          events={dayPopover.events}
+          time24h={config?.locale.time_24h ?? true}
+          anchor={dayPopover.anchor}
+          onClose={() => setDayPopover(null)}
+          onSelectEvent={(ev) => {
+            setDayPopover(null);
+            setSelected(ev);
           }}
         />
       )}

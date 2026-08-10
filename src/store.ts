@@ -1,6 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
+import { isTauri, mockInvoke } from "./demoData";
+
+async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (isTauri()) return invoke<T>(cmd, args);
+  return mockInvoke<T>(cmd, args);
+}
 
 export type Attendee = {
   email: string;
@@ -190,7 +196,7 @@ export const useApp = create<Store>((set, get) => ({
 
   load: async () => {
     try {
-      const snap = await invoke<{
+      const snap = await safeInvoke<{
         config: AppConfig;
         calendars: Calendar[];
         events: CalEvent[];
@@ -222,7 +228,7 @@ export const useApp = create<Store>((set, get) => ({
   sync: async () => {
     set({ syncing: true, error: undefined });
     try {
-      await invoke("sync_now");
+      await safeInvoke("sync_now");
       await get().load();
     } catch (e) {
       set({ error: String(e) });
@@ -241,21 +247,45 @@ export const useApp = create<Store>((set, get) => ({
   setImportError: (e) => set({ importError: e }),
 
   toggleCalendar: async (id, visible) => {
+    if (!isTauri()) {
+      set({
+        calendars: get().calendars.map((c) => (c.id === id ? { ...c, visible } : c)),
+      });
+      return;
+    }
     await invoke("set_calendar_visible", { id, visible });
     await get().load();
   },
 
   setCalendarColor: async (id, color) => {
+    if (!isTauri()) {
+      set({
+        calendars: get().calendars.map((c) => (c.id === id ? { ...c, color } : c)),
+      });
+      return;
+    }
     await invoke("set_calendar_color", { id, color });
     await get().load();
   },
 
   setDefaultCalendar: async (id) => {
+    if (!isTauri()) {
+      set({ defaultCalendarId: id });
+      return;
+    }
     await invoke("set_default_calendar", { id });
     await get().load();
   },
 
   setCalendarSubscribed: async (id, subscribed) => {
+    if (!isTauri()) {
+      set({
+        calendars: get().calendars.map((c) =>
+          c.id === id ? { ...c, subscribed, visible: subscribed ? true : c.visible } : c,
+        ),
+      });
+      return;
+    }
     await invoke("set_calendar_subscribed", { id, subscribed });
     await get().load();
     if (subscribed) {
@@ -265,6 +295,19 @@ export const useApp = create<Store>((set, get) => ({
   },
 
   reorderCalendars: async (accountId, orderedIds) => {
+    if (!isTauri()) {
+      const order = new Map(orderedIds.map((id, i) => [id, i]));
+      set({
+        calendars: get()
+          .calendars.map((c) =>
+            c.account_id === accountId && order.has(c.id)
+              ? { ...c, sort_order: order.get(c.id)! }
+              : c,
+          )
+          .sort((a, b) => a.sort_order - b.sort_order),
+      });
+      return;
+    }
     await invoke("reorder_calendars", {
       accountId,
       orderedIds,
@@ -278,12 +321,13 @@ export const useApp = create<Store>((set, get) => ({
       set({ searchResults: [] });
       return;
     }
-    const results = await invoke<CalEvent[]>("search_events", { query: q });
+    const results = await safeInvoke<CalEvent[]>("search_events", { query: q });
     set({ searchResults: results });
   },
 }));
 
 export async function bootListeners() {
+  if (!isTauri()) return; // browser preview: no backend events to listen for
   await listen<ThemeColors>("theme-changed", (ev) => {
     useApp.getState().applyTheme(ev.payload);
   });
@@ -305,29 +349,29 @@ export async function bootListeners() {
 }
 
 export async function saveEvent(input: EventInput) {
-  return invoke<CalEvent>("save_event", { input });
+  return safeInvoke<CalEvent>("save_event", { input });
 }
 
 export async function previewIcs(path: string): Promise<ImportPreview> {
-  return invoke<ImportPreview>("preview_ics", { path });
+  return safeInvoke<ImportPreview>("preview_ics", { path });
 }
 
 export async function takePendingImports(): Promise<string[]> {
-  return invoke<string[]>("take_pending_imports");
+  return safeInvoke<string[]>("take_pending_imports");
 }
 
 export async function deleteEvent(id: number) {
-  return invoke("delete_event", { id });
+  return safeInvoke("delete_event", { id });
 }
 
 export async function respondInvite(eventId: number, partstat: string) {
-  return invoke<CalEvent>("respond_invite", {
+  return safeInvoke<CalEvent>("respond_invite", {
     req: { event_id: eventId, partstat },
   });
 }
 
 export async function respondInvitesBulk(eventIds: number[], partstat: string) {
-  return invoke<{ ok: number; failed: number; errors: string[] }>(
+  return safeInvoke<{ ok: number; failed: number; errors: string[] }>(
     "respond_invites_bulk",
     {
       req: { event_ids: eventIds, partstat },
@@ -342,11 +386,11 @@ export async function addAccount(payload: {
   password: string;
   addresses: string[];
 }) {
-  return invoke<Account>("add_account", { req: payload });
+  return safeInvoke<Account>("add_account", { req: payload });
 }
 
 export async function removeAccount(account_id: string) {
-  return invoke("remove_account", { accountId: account_id });
+  return safeInvoke("remove_account", { accountId: account_id });
 }
 
 export async function testAccount(
@@ -354,7 +398,7 @@ export async function testAccount(
   username: string,
   password: string,
 ) {
-  return invoke<string[]>("test_account", {
+  return safeInvoke<string[]>("test_account", {
     caldavUrl: caldav_url,
     username,
     password,
