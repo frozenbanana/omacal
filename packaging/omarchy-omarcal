@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Launch Omarcal as a floating Hyprland window (Omarchy-style).
+set -euo pipefail
+
+APP="${OMARCAL_BIN:-omarcal}"
+
+# If already running, focus it
+if hyprctl clients -j 2>/dev/null | grep -q '"class": "omarcal"'; then
+  hyprctl dispatch focuswindow "class:omarcal"
+  exit 0
+fi
+
+# Temporary window rule for next launch
+hyprctl keyword windowrulev2 "float, class:^(omarcal)$" 2>/dev/null || true
+hyprctl keyword windowrulev2 "size 1280 800, class:^(omarcal)$" 2>/dev/null || true
+hyprctl keyword windowrulev2 "center, class:^(omarcal)$" 2>/dev/null || true
+
+exec "$APP" "$@"

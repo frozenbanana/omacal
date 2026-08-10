@@ -1,0 +1,685 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b0c16;
+  --fg: #ddf7ff;
+  --accent: #82fb9c;
+  --cursor: #ddf7ff;
+  --sel-fg: #0b0c16;
+  --sel-bg: #ddf7ff;
+  --muted: color-mix(in srgb, var(--fg) 55%, transparent);
+  --panel: color-mix(in srgb, var(--fg) 6%, var(--bg));
+  --border: color-mix(in srgb, var(--fg) 14%, transparent);
+  --danger: #ff6b7a;
+  font-family: "JetBrains Mono", "Iosevka", "Cascadia Code", ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  background: color-mix(in srgb, var(--fg) 8%, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.45rem 0.65rem;
+}
+
+button {
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+button.ghost {
+  background: transparent;
+}
+
+button.danger {
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+  color: var(--danger);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+
+.sidebar {
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.brand {
+  padding: 1.1rem 1rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.brand p {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.sidebar-section {
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-section h2 {
+  margin: 0 0 0.55rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.cal-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.28rem 0.15rem;
+  border-radius: 4px;
+  user-select: none;
+}
+
+.cal-row input {
+  accent-color: var(--accent);
+}
+
+.cal-row.dragging {
+  opacity: 0.45;
+}
+
+.cal-row.drag-over {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.cal-row.unsubscribed {
+  opacity: 0.85;
+}
+
+.cal-drag-handle {
+  color: var(--muted);
+  font-size: 0.65rem;
+  letter-spacing: -0.08em;
+  cursor: grab;
+  width: 0.9rem;
+  flex: 0 0 auto;
+  line-height: 1;
+}
+
+.cal-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-default-star {
+  color: var(--accent);
+}
+
+.cal-menu-btn {
+  padding: 0.1rem 0.35rem;
+  border: 0;
+  opacity: 0.55;
+  line-height: 1;
+}
+
+.cal-row:hover .cal-menu-btn {
+  opacity: 1;
+}
+
+.cal-account-group {
+  margin-bottom: 0.55rem;
+}
+
+.cal-account-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin: 0.35rem 0 0.2rem;
+  letter-spacing: 0.04em;
+}
+
+.cal-unsubscribed {
+  margin-top: 0.5rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+}
+
+.cal-unsubscribed-toggle {
+  width: 100%;
+  text-align: left;
+  padding: 0.25rem 0;
+  border: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.cal-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+}
+
+.cal-context-menu {
+  position: fixed;
+  z-index: 51;
+  min-width: 160px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.3rem;
+  box-shadow: 0 10px 30px color-mix(in srgb, black 40%, transparent);
+  display: grid;
+  gap: 0.15rem;
+}
+
+.cal-context-menu button {
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 0.4rem 0.55rem;
+  border-radius: 5px;
+}
+
+.cal-context-menu button:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.cal-context-menu button.danger-text {
+  color: var(--danger);
+}
+
+.cal-color-picker {
+  padding: 0.25rem 0.55rem 0.4rem;
+}
+
+.cal-color-picker input[type="color"] {
+  width: 100%;
+  height: 2rem;
+  padding: 0.15rem;
+  cursor: pointer;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 80%, black);
+}
+
+.toolbar .spacer {
+  flex: 1;
+}
+
+.view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.view-toggle button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.view-toggle button.active {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.calendar-wrap {
+  flex: 1;
+  min-height: 0;
+  padding: 0.5rem;
+}
+
+.fc {
+  --fc-border-color: var(--border);
+  --fc-page-bg-color: var(--bg);
+  --fc-neutral-bg-color: var(--panel);
+  --fc-list-event-hover-bg-color: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  --fc-today-bg-color: color-mix(in srgb, var(--accent) 8%, var(--bg));
+  --fc-button-bg-color: transparent;
+  --fc-button-border-color: var(--border);
+  --fc-button-text-color: var(--fg);
+  --fc-button-hover-bg-color: color-mix(in srgb, var(--fg) 10%, var(--bg));
+  --fc-button-active-bg-color: var(--accent);
+  --fc-button-active-text-color: var(--bg);
+  --fc-event-border-color: transparent;
+  height: 100%;
+  color: var(--fg);
+}
+
+.fc .fc-toolbar-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.fc .fc-col-header-cell-cushion,
+.fc .fc-daygrid-day-number {
+  color: var(--muted);
+}
+
+.fc-event {
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.fc-event.fc-invite {
+  background: transparent !important;
+  border: 1px dashed var(--fc-event-border-color, var(--accent)) !important;
+  color: var(--fg) !important;
+  box-shadow: none;
+}
+
+.fc-event.fc-invite .fc-event-main {
+  color: var(--fg) !important;
+  height: 100%;
+}
+
+.fc-invite-body {
+  --invite-color: var(--accent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 1px 2px;
+  overflow: hidden;
+  border-radius: 3px;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--invite-color) 42%, transparent),
+    color-mix(in srgb, var(--invite-color) 42%, transparent) 3px,
+    color-mix(in srgb, var(--invite-color) 14%, var(--bg)) 3px,
+    color-mix(in srgb, var(--invite-color) 14%, var(--bg)) 7px
+  );
+}
+
+.fc-invite-main {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.fc-invite-main .fc-event-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: italic;
+}
+
+.fc-invite-badge {
+  flex: 0 0 auto;
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 999px;
+  border: 1px solid var(--invite-color, var(--accent));
+  color: var(--invite-color, var(--accent));
+  font-size: 0.65rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+.fc-invite-actions {
+  display: none;
+  gap: 0.2rem;
+  align-items: center;
+}
+
+.fc-event.fc-invite:hover .fc-invite-actions,
+.fc-event.fc-invite:focus-within .fc-invite-actions {
+  display: flex;
+}
+
+.fc-invite-btn {
+  flex: 1;
+  min-width: 0;
+  padding: 0.05rem 0.15rem;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  cursor: pointer;
+}
+
+.fc-invite-btn.accept {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: transparent;
+  font-weight: 700;
+}
+
+.fc-invite-btn.maybe {
+  color: var(--fg);
+}
+
+.fc-invite-btn.decline {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.fc-invite-btn:disabled {
+  opacity: 0.5;
+}
+
+.fc-daygrid-event.fc-invite .fc-invite-actions {
+  margin-top: 0.1rem;
+}
+
+.fc-event.fc-rsvp-tentative {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--fc-event-border-color, var(--accent)) 55%, transparent),
+    color-mix(in srgb, var(--fc-event-border-color, var(--accent)) 55%, transparent) 3px,
+    color-mix(in srgb, var(--fc-event-border-color, var(--accent)) 22%, var(--bg)) 3px,
+    color-mix(in srgb, var(--fc-event-border-color, var(--accent)) 22%, var(--bg)) 7px
+  ) !important;
+  border-style: dashed !important;
+  opacity: 0.92;
+}
+
+.fc-event.fc-rsvp-declined {
+  opacity: 0.45;
+  text-decoration: line-through;
+  filter: grayscale(0.35);
+}
+
+.rsvp-panel {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+
+.rsvp-current {
+  margin: 0.25rem 0 0.55rem;
+  font-weight: 600;
+}
+
+.rsvp-actions button.rsvp-selected {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.drawer-backdrop,
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, black 45%, transparent);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 40;
+}
+
+.modal-backdrop {
+  justify-content: center;
+  align-items: center;
+}
+
+.drawer,
+.modal {
+  width: min(420px, 100%);
+  height: 100%;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  padding: 1rem;
+  overflow: auto;
+  box-shadow: -12px 0 40px color-mix(in srgb, black 35%, transparent);
+}
+
+.modal {
+  height: auto;
+  max-height: 90vh;
+  width: min(520px, 94vw);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px color-mix(in srgb, black 45%, transparent);
+}
+
+.drawer h2,
+.modal h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+}
+
+.form-grid {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.form-grid label {
+  display: grid;
+  gap: 0.3rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.invite-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem;
+  margin-bottom: 0.45rem;
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg));
+}
+
+.invite-item strong {
+  display: block;
+}
+
+.section-collapse-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.section-collapse-toggle h2 {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.section-collapse-arrow {
+  color: var(--muted);
+  width: 0.85rem;
+  flex: 0 0 auto;
+}
+
+.invites-summary {
+  margin-left: auto;
+  font-size: 0.7rem;
+}
+
+.invites-panel {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 45%;
+}
+
+.invite-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0.55rem 0 0.4rem;
+}
+
+.invite-filters button {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.7rem;
+}
+
+.invite-filters button.active {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: transparent;
+}
+
+.invite-bulk-bar,
+.invite-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+
+.invite-bulk-bar button,
+.invite-bulk-actions button {
+  padding: 0.25rem 0.45rem;
+  font-size: 0.7rem;
+}
+
+.invites-status {
+  font-size: 0.7rem;
+  margin-bottom: 0.35rem;
+}
+
+.invite-list {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+  max-height: 220px;
+}
+
+.invite-select {
+  display: flex;
+  gap: 0.45rem;
+  align-items: flex-start;
+  margin-bottom: 0.35rem;
+  cursor: pointer;
+}
+
+.invite-select input {
+  margin-top: 0.2rem;
+  accent-color: var(--accent);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.error {
+  color: var(--danger);
+  padding: 0.5rem 0.85rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+}
+
+.search-results {
+  max-height: 180px;
+  overflow: auto;
+}
+
+.search-hit {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-bottom: 0.25rem;
+  background: transparent;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.2rem;
+  height: 1.2rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 0.7rem;
+  font-weight: 700;
+}

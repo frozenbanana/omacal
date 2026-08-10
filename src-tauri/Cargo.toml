@@ -1,0 +1,48 @@
+[package]
+name = "omarcal"
+version = "0.1.0"
+description = "Omarchy-native CalDAV calendar"
+authors = ["henry"]
+edition = "2021"
+
+[lib]
+name = "omarcal_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-notification = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+keyring = { version = "3", features = ["linux-native", "sync-secret-service", "vendored"] }
+icalendar = { version = "0.16", features = ["chrono-tz"] }
+rrule = "0.13"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+uuid = { version = "1", features = ["v4", "serde"] }
+toml = "0.8"
+dirs = "6"
+notify = "7"
+notify-rust = "4"
+quick-xml = { version = "0.37", features = ["serialize"] }
+thiserror = "2"
+anyhow = "1"
+base64 = "0.22"
+url = "2"
+regex = "1"
+parking_lot = "0.12"
+log = "0.4"
+env_logger = "0.11"
+
+# Production builds must enable this so the UI is embedded (not localhost:1420).
+# `tauri dev` disables default features so Vite still works.
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

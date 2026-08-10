@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Waybar custom module: next Omarcal event
+set -euo pipefail
+
+DB="${XDG_DATA_HOME:-$HOME/.local/share}/omarcal/omarcal.db"
+if [[ ! -f "$DB" ]]; then
+  printf '{"text":"󰃭","tooltip":"Omarcal — no data yet","class":"omarcal"}\n'
+  exit 0
+fi
+
+python3 - "$DB" <<'PY'
+import json, sqlite3, sys
+from datetime import datetime, timezone
+
+db = sys.argv[1]
+conn = sqlite3.connect(db)
+row = conn.execute(
+    """
+    SELECT o.summary, o.dtstart, o.location
+    FROM objects o
+    JOIN calendars c ON c.id = o.calendar_id
+    WHERE c.visible = 1 AND o.dtstart IS NOT NULL AND o.dtstart >= ?
+    ORDER BY o.dtstart ASC
+    LIMIT 1
+    """,
+    (datetime.now(timezone.utc).isoformat(),),
+).fetchone()
+if not row:
+    print(json.dumps({"text": "󰃭", "tooltip": "No upcoming events", "class": "omarcal"}))
+else:
+    title, start, loc = row
+    try:
+        dt = datetime.fromisoformat(start.replace("Z", "+00:00")).astimezone()
+        when = dt.strftime("%H:%M")
+    except Exception:
+        when = start
+    tip = f"{when}  {title}" + (f" @ {loc}" if loc else "")
+    short = title if len(title) <= 24 else title[:23] + "…"
+    print(json.dumps({"text": f"󰃭 {when} {short}", "tooltip": tip, "class": "omarcal"}))
+PY
