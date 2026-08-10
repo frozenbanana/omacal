@@ -57,6 +57,14 @@ function partstatClass(e: CalEvent): string | undefined {
   }
 }
 
+function toDraftWallClock(d: Date, allDay: boolean): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (allDay) {
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+}
+
 function toFcEvents(events: CalEvent[]): FCEventInput[] {
   return events.flatMap((e) => {
     if (!e.start) return [];
@@ -337,12 +345,8 @@ export default function App() {
       summary: "",
       description: "",
       location: "",
-      dtstart: allDay
-        ? s.toISOString().slice(0, 10)
-        : s.toISOString().slice(0, 19),
-      dtend: allDay
-        ? e.toISOString().slice(0, 10)
-        : e.toISOString().slice(0, 19),
+      dtstart: toDraftWallClock(s, allDay),
+      dtend: toDraftWallClock(e, allDay),
       all_day: allDay,
       timezone: config?.locale.timezone || "Europe/Stockholm",
       alarms: [{ trigger: "-PT15M" }],
@@ -435,12 +439,12 @@ export default function App() {
         summary: ev.title,
         description: ev.description,
         location: ev.location,
-        dtstart: arg.event.start?.toISOString() || ev.start || "",
-        dtend:
-          arg.event.end?.toISOString() ||
-          arg.event.start?.toISOString() ||
-          ev.end ||
-          "",
+        dtstart: arg.event.start
+          ? toDraftWallClock(arg.event.start, arg.event.allDay)
+          : ev.start || "",
+        dtend: arg.event.end
+          ? toDraftWallClock(arg.event.end, arg.event.allDay)
+          : ev.end || "",
         all_day: arg.event.allDay,
         timezone: config?.locale.timezone || "Europe/Stockholm",
         rrule: ev.rrule,
