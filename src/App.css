@@ -327,6 +327,13 @@ button:disabled {
   font-size: 0.75rem;
 }
 
+.fc .fc-event.om-marked {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 0 10px color-mix(in srgb, var(--accent) 35%, transparent) !important;
+  filter: saturate(1.08);
+}
+
 .fc-event.fc-invite {
   background: transparent !important;
   border: 1px dashed var(--fc-event-border-color, var(--accent)) !important;
@@ -711,6 +718,17 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+}
+
+.nav-notice {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ import type {
   EventMountArg,
   MoreLinkArg,
 } from "@fullcalendar/core";
-import type { EventResizeDoneArg } from "@fullcalendar/interaction";
+import type { EventResizeDoneArg, DateClickArg } from "@fullcalendar/interaction";
 import "./App.css";
 import {
   bootListeners,
@@ -24,6 +24,7 @@ import {
   takePendingImports,
   useApp,
   type CalEvent,
+  type Calendar,
   type ImportPreview,
 } from "./store";
 import {
@@ -65,11 +66,13 @@ function toDraftWallClock(d: Date, allDay: boolean): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
 }
 
-function toFcEvents(events: CalEvent[]): FCEventInput[] {
+function toFcEvents(events: CalEvent[], marked: CalEvent | null): FCEventInput[] {
   return events.flatMap((e) => {
     if (!e.start) return [];
     const invite = isInvite(e);
     const statusClass = partstatClass(e);
+    const isMarked =
+      marked != null && e.id === marked.id && e.start === marked.start;
     const base: FCEventInput = {
       id: `${e.id}:${e.start}`,
       title: e.title || "(no title)",
@@ -82,6 +85,7 @@ function toFcEvents(events: CalEvent[]): FCEventInput[] {
       classNames: [
         e.all_day ? "om-allday" : "om-timed",
         ...(statusClass ? [statusClass] : []),
+        ...(isMarked ? ["om-marked"] : []),
       ],
       extendedProps: { calEvent: e, invite },
     };
@@ -132,6 +136,17 @@ export default function App() {
     events: CalEvent[];
     anchor: DayPopoverAnchor;
   } | null>(null);
+  const [marked, setMarked] = useState<CalEvent | null>(null);
+  const [clipboard, setClipboard] = useState<CalEvent | null>(null);
+  const [lastClickedDay, setLastClickedDay] = useState<Date | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<number | null>(null);
+
+  function showNotice(msg: string) {
+    setNotice(msg);
+    if (noticeTimer.current != null) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 1800);
+  }
 
   useEffect(() => {
     bootListeners().then(async () => {
@@ -160,12 +175,72 @@ export default function App() {
     const onKey = (ev: KeyboardEvent) => {
       const tag = (ev.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (showEditor || showSettings) return;
       if (ev.key === "n") {
         ev.preventDefault();
         openNew();
       } else if (ev.key === "t") {
         ev.preventDefault();
         calRef.current?.getApi().today();
+      } else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "c") {
+        if (!marked) return;
+        ev.preventDefault();
+        setClipboard(marked);
+        showNotice("Copied");
+      } else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "x") {
+        if (!marked) return;
+        ev.preventDefault();
+        if (marked.readonly) {
+          showNotice("Read-only, cannot cut");
+          return;
+        }
+        setClipboard(marked);
+        const id = marked.id;
+        setMarked(null);
+        void (async () => {
+          try {
+            await deleteEvent(id);
+            await load();
+            showNotice("Moved to clipboard");
+          } catch (e) {
+            useApp.setState({ error: String(e) });
+          }
+        })();
+      } else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "v") {
+        if (!clipboard) return;
+        ev.preventDefault();
+        if (!lastClickedDay) {
+          showNotice("Click a day first");
+          return;
+        }
+        void (async () => {
+          try {
+            await pasteClipboard();
+            showNotice("Pasted");
+          } catch (e) {
+            useApp.setState({ error: String(e) });
+          }
+        })();
+      } else if (ev.key === "Escape" && marked) {
+        ev.preventDefault();
+        setMarked(null);
+      } else if ((ev.key === "Delete" || ev.key === "Backspace") && marked) {
+        ev.preventDefault();
+        if (marked.readonly) {
+          showNotice("Read-only, cannot delete");
+          return;
+        }
+        const id = marked.id;
+        setMarked(null);
+        void (async () => {
+          try {
+            await deleteEvent(id);
+            await load();
+            showNotice("Deleted");
+          } catch (e) {
+            useApp.setState({ error: String(e) });
+          }
+        })();
       } else if (ev.key === "ArrowLeft" && !ev.metaKey && !ev.ctrlKey) {
         calRef.current?.getApi().prev();
       } else if (ev.key === "ArrowRight" && !ev.metaKey && !ev.ctrlKey) {
@@ -176,9 +251,9 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, calendars, config, defaultCalendarId]);
+  }, [selected, calendars, config, defaultCalendarId, marked, clipboard, lastClickedDay, showEditor, showSettings]);
 
-  const fcEvents = useMemo(() => toFcEvents(events), [events]);
+  const fcEvents = useMemo(() => toFcEvents(events, marked), [events, marked]);
 
   const visibleEvents = useMemo(() => {
     const visibleIds = new Set(
@@ -317,22 +392,29 @@ export default function App() {
     );
   }
 
-  function openNew(start?: Date, end?: Date, allDay = false) {
+  function pickWritableCalendar(preferId?: number | null): Calendar | undefined {
     const subscribed = calendars.filter((c) => c.subscribed !== false);
-    const defaultCal =
-      defaultCalendarId != null
-        ? subscribed.find(
-            (c) =>
-              c.id === defaultCalendarId &&
-              c.visible &&
-              !c.readonly,
-          )
+    const preferred =
+      preferId != null
+        ? subscribed.find((c) => c.id === preferId && c.visible && !c.readonly)
         : undefined;
-    const firstWritable =
+    const defaultCal =
+      preferred ||
+      (defaultCalendarId != null
+        ? subscribed.find(
+            (c) => c.id === defaultCalendarId && c.visible && !c.readonly,
+          )
+        : undefined);
+    return (
       defaultCal ||
       subscribed.find((c) => c.visible && !c.readonly) ||
       subscribed.find((c) => !c.readonly) ||
-      subscribed[0];
+      subscribed[0]
+    );
+  }
+
+  function openNew(start?: Date, end?: Date, allDay = false) {
+    const firstWritable = pickWritableCalendar();
     if (!firstWritable) {
       setShowSettings(true);
       return;
@@ -420,8 +502,17 @@ export default function App() {
     openNew(sel.start, sel.end, sel.allDay);
   }
 
+  function onDateClick(arg: DateClickArg) {
+    setLastClickedDay(arg.date);
+  }
+
   function onEventClick(arg: EventClickArg) {
     const ev = arg.event.extendedProps.calEvent as CalEvent;
+    if (arg.jsEvent.shiftKey) {
+      arg.jsEvent.preventDefault();
+      setMarked((prev) => (prev?.id === ev.id ? null : ev));
+      return;
+    }
     setSelected(ev);
   }
 
@@ -458,6 +549,56 @@ export default function App() {
       arg.revert();
       useApp.setState({ error: String(e) });
     }
+  }
+
+  async function pasteClipboard() {
+    const src = clipboard;
+    const day = lastClickedDay;
+    if (!src || !day) return;
+
+    const sStart = new Date(src.start || "");
+    if (Number.isNaN(sStart.getTime())) {
+      throw new Error("copied event has no start time");
+    }
+    const targetStart = src.all_day
+      ? new Date(day.getFullYear(), day.getMonth(), day.getDate())
+      : new Date(
+          day.getFullYear(),
+          day.getMonth(),
+          day.getDate(),
+          sStart.getHours(),
+          sStart.getMinutes(),
+        );
+    let durMs = 60 * 60 * 1000;
+    if (src.end) {
+      const sEnd = new Date(src.end);
+      if (!Number.isNaN(sEnd.getTime())) durMs = sEnd.getTime() - sStart.getTime();
+    }
+    const targetEnd = new Date(targetStart.getTime() + durMs);
+
+    const target = pickWritableCalendar(src.calendar_id);
+    if (!target) {
+      setShowSettings(true);
+      throw new Error("no writable calendar");
+    }
+
+    await saveEvent({
+      calendar_id: target.id,
+      uid: undefined,
+      summary: src.title,
+      description: src.description,
+      location: src.location,
+      dtstart: toDraftWallClock(targetStart, src.all_day),
+      dtend: toDraftWallClock(targetEnd, src.all_day),
+      all_day: src.all_day,
+      timezone: config?.locale.timezone || "Europe/Stockholm",
+      rrule: null,
+      alarms: src.alarms,
+      attendees: [],
+      href: undefined,
+      etag: undefined,
+    });
+    await load();
   }
 
   function goToDay(date: Date) {
@@ -575,6 +716,7 @@ export default function App() {
             ›
           </button>
           <span className="nav-title">{navTitle}</span>
+          {notice && <span className="nav-notice">{notice}</span>}
         </div>
         <div className="toolbar" data-tauri-drag-region="deep">
           <div className="view-toggle">
@@ -660,6 +802,7 @@ export default function App() {
               setCurrentDate(info.start);
             }}
             select={onSelect}
+            dateClick={onDateClick}
             eventClick={onEventClick}
             eventDrop={persistMove}
             eventResize={persistMove}
