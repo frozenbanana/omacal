@@ -188,18 +188,24 @@ Tables (see `db.rs` migrate):
 - `objects` — raw ICS + indexed fields (uid, dtstart/end, rrule, attendees_json, alarms_json, my_partstat)
 - `outbox` — reserved for durable writes
 - `alarm_log` — de-dupe fired alarms
-- `meta` — last_sync / last_sync_error
+- `meta` — last_sync / last_sync_error + repair flags `ics_vevent_parse_v1`, `ics_tz_fix_v2`
 
 **Source of truth for an event is `raw_ics`.** Index columns are derived for UI/query.
 
-Writes: build/update ICS → CalDAV PUT with If-Match ETag → upsert local row.
+- `dtstart/dtend` stored as UTC RFC3339 (`2026-01-26T05:00:00+00:00`) or `YYYY-MM-DD` for all-day.
+- **Floating** `DTSTART:20260914T090000` (no TZID, no Z) is interpreted as `config.locale.timezone` (`Europe/Stockholm`) — not UTC. Summer `09:00` → `07:00Z`.
+- **RRULE** wall-time DST-safe: expansion uses `DTSTART;TZID=wall` via `rrule` so `06:00 Stockholm` stays `06:00` (`05:00Z` winter / `04:00Z` summer). Legacy UTC expansion drifted `+1h` in summer (fixed via `expand_rrule_from_raw` in `ics.rs` + `build_events`/`alarms.rs`). Auto-repaired on next sync (`ics_tz_fix_v2`).
+
+Writes: build/update ICS → `DTSTART;TZID=timezone:wall` → CalDAV PUT with If-Match ETag → re-parse with `input.timezone` → upsert local row.
 
 Recurrence: expand with `rrule` crate for UI/alarms (`build_events` / `alarms.rs`). Occurrence UIDs may be `uid::timestamp`; strip `::…` before save/edit.
 
 ## Frontend conventions
 
 - State: Zustand in `store.ts`; durable data only via invoke.
-- Views: FullCalendar (`dayGridMonth`, `timeGridWeek`, `timeGridDay`, `multiMonthYear`).
+- Views: FullCalendar (`dayGridMonth`, `timeGridWeek`, `timeGridDay`, `multiMonthYear`) + `@fullcalendar/luxon3`.
+- **Timezone is config-driven:** `<FullCalendar timeZone={config.locale.timezone}>` via Luxon (`Europe/Stockholm` default). Helpers in `eventLayout.ts`/`App.tsx`/`EventEditor.tsx` all take `timeZone` via `luxon.DateTime` — don’t fall back to `new Date().getHours()` alone. System tz mismatch shows `· system <Zone>` in sidebar.
+- **Timeline is full-day:** `slotMinTime 00:00:00 – slotMaxTime 24:00:00`, `slotDuration 00:30`, `slotLabelInterval 01:00`, `scrollTime 08:00:00`, `expandRows`. Don’t regress to `06-22`.
 - Theme: CSS variables `--bg`, `--fg`, `--accent`, `--color0`… from Omarchy; no hardcoded purple/cream AI palettes.
 - Fonts: monospace stack (JetBrains Mono / Iosevka / Cascadia) to fit Omarchy.
 - Shortcuts: `n` new, `e` edit, `t` today, arrows navigate (ignore when typing in inputs).
@@ -246,6 +252,9 @@ Match existing user prefs unless told otherwise:
 | White screen + connection refused | Binary built without production/`custom-protocol`; still pointing at Vite `:1420` |
 | `no current-user-principal in response` | XML local-name/prefix bug or bad URL/auth (check 401 path) |
 | `OK — found calendars: (none)` | Calendar list parser missing `XmlEvent::Empty` for `<cal:calendar/>` |
+| Events +1h vs Nextcloud (e.g. `06:00 → 07:00` in summer) | Legacy UTC RRULE expansion or floating-as-UTC bug — fixed in `ics.rs` `expand_rrule_from_raw` + `ics_tz_fix_v2` repair. Force re-sync. |
+| Timeline stops at 10pm / night events clipped | Regressed `slotMaxTime 22:00` — keep `00:00–24:00` with `expandRows` in `App.tsx` |
+| Times wrong when OS tz ≠ `config.locale.timezone` | Frontend now config-driven via `timeZone` + Luxon; check sidebar shows `· system <Zone>` when mismatched |
 | Sync races / duplicate edits | vdirsyncer still running against same calendars |
 | Theme doesn’t update | Watcher not seeing Omarchy theme symlink swap; check `theme.rs` paths |
 | Alarms missing when window closed | Need tray/daemon (`omarcal-daemon.service` or keep tray running) |

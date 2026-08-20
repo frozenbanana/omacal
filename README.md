@@ -14,11 +14,12 @@ helper.
 
 ## Features
 
-- Day / week / month / year views (FullCalendar)
+- Day / week / month / year views (FullCalendar + Luxon)
 - Native CalDAV sync: discovery, `sync-collection`, ETag-aware writes
 - Create / edit / delete events, drag-move and resize
-- All-day events and timezone-aware times
-- Recurrence (RRULE) with expanded occurrences in UI and alarms
+- All-day events and **config-driven timezone** — wall times stay `06:00` across CET/CEST, DST-safe
+- Recurrence (RRULE) expanded with wall-time semantics (e.g. weekly `06:00 Stockholm` stays `06:00`, `04:00Z` summer / `05:00Z` winter)
+- Full-day timeline `00:00–24:00` with scroll to `08:00`, no clipping of night events
 - Reminders → desktop notifications (Mako)
 - Attendees + Accept / Maybe / Decline for pending invites
 - Import `.ics` files — double-click and confirm
@@ -28,9 +29,9 @@ helper.
 
 ## Stack
 
-- **UI:** Tauri 2 + React + TypeScript + FullCalendar
-- **Core:** Rust — reqwest CalDAV client, SQLite, system keyring, notify
-- **Calendar:** iCalendar (ICS), RRULE, alarms, PARTSTAT
+- **UI:** Tauri 2 + React + TypeScript + FullCalendar (+ `@fullcalendar/luxon3` + `luxon` for IANA timezones)
+- **Core:** Rust — reqwest CalDAV client, SQLite, system keyring, notify, `chrono-tz` + `rrule`
+- **Calendar:** iCalendar (ICS), RRULE (wall-time expansion), alarms, PARTSTAT
 
 ## Requirements
 
@@ -151,16 +152,19 @@ Nextcloud app passwords.
 
 ```
 React UI --invoke--> Commands --> Db (SQLite)
-                             |          ^
+     (Luxon tz)                   |          ^
                              v          |
                         SyncEngine <-> CalDavClient (reqwest)
                              |
                         Nextcloud CalDAV
 ```
 
-- Source of truth for an event is `raw_ics`; index columns are derived.
+- Source of truth for an event is `raw_ics`; index columns (`dtstart` as UTC RFC3339, etc.) are derived.
+- Timed events stored as UTC, but **floating** `DTSTART:20260126T060000` is interpreted as `config.locale.timezone` (`Europe/Stockholm` by default). `WithTimezone` `DTSTART;TZID=...:20260126T060000` is converted via `chrono-tz`.
+- Recurring events keep wall time across DST: expansion uses `DTSTART;TZID=…:wall` via `rrule` so `06:00 Stockholm` is `05:00Z` winter / `04:00Z` summer (auto-repaired on next sync via `ics_tz_fix_v2`).
 - Background loops: theme watcher, alarm notifications, interval sync, tray.
 - Single-instance guard forwards opened `.ics` files to the running app.
+- Full-day week view: `slotMinTime 00:00–24:00`, `slotDuration 00:30`, `scrollTime 08:00`, `expandRows`, `timeZone = config.locale.timezone` via Luxon.
 
 ## License
 

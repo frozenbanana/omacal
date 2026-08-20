@@ -4,6 +4,8 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import multiMonthPlugin from "@fullcalendar/multimonth";
 import interactionPlugin from "@fullcalendar/interaction";
+import luxonPlugin from "@fullcalendar/luxon3";
+import { DateTime } from "luxon";
 import type {
   DateSelectArg,
   EventClickArg,
@@ -58,8 +60,15 @@ function partstatClass(e: CalEvent): string | undefined {
   }
 }
 
-function toDraftWallClock(d: Date, allDay: boolean): string {
+function toDraftWallClock(d: Date, allDay: boolean, timeZone?: string): string {
   const pad = (n: number) => String(n).padStart(2, "0");
+  if (timeZone) {
+    const dt = DateTime.fromJSDate(d, { zone: timeZone });
+    if (dt.isValid) {
+      if (allDay) return dt.toFormat("yyyy-MM-dd");
+      return dt.toFormat("yyyy-MM-dd'T'HH:mm:00");
+    }
+  }
   if (allDay) {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
@@ -422,15 +431,16 @@ export default function App() {
     const s = start || new Date();
     const e = end || new Date(s.getTime() + 60 * 60 * 1000);
     setEditorTitle(undefined);
+    const tz = config?.locale.timezone || "Europe/Stockholm";
     setEditorDraft({
       calendar_id: firstWritable.id,
       summary: "",
       description: "",
       location: "",
-      dtstart: toDraftWallClock(s, allDay),
-      dtend: toDraftWallClock(e, allDay),
+      dtstart: toDraftWallClock(s, allDay, tz),
+      dtend: toDraftWallClock(e, allDay, tz),
       all_day: allDay,
-      timezone: config?.locale.timezone || "Europe/Stockholm",
+      timezone: tz,
       alarms: [{ trigger: "-PT15M" }],
       attendees: [],
     });
@@ -524,6 +534,7 @@ export default function App() {
     }
     try {
       const baseUid = ev.uid.includes("::") ? ev.uid.split("::")[0] : ev.uid;
+      const tz = config?.locale.timezone || "Europe/Stockholm";
       await saveEvent({
         calendar_id: ev.calendar_id,
         uid: baseUid,
@@ -531,13 +542,13 @@ export default function App() {
         description: ev.description,
         location: ev.location,
         dtstart: arg.event.start
-          ? toDraftWallClock(arg.event.start, arg.event.allDay)
+          ? toDraftWallClock(arg.event.start, arg.event.allDay, tz)
           : ev.start || "",
         dtend: arg.event.end
-          ? toDraftWallClock(arg.event.end, arg.event.allDay)
+          ? toDraftWallClock(arg.event.end, arg.event.allDay, tz)
           : ev.end || "",
         all_day: arg.event.allDay,
-        timezone: config?.locale.timezone || "Europe/Stockholm",
+        timezone: tz,
         rrule: ev.rrule,
         alarms: ev.alarms,
         attendees: ev.attendees,
@@ -556,19 +567,22 @@ export default function App() {
     const day = lastClickedDay;
     if (!src || !day) return;
 
+    const tz = config?.locale.timezone || "Europe/Stockholm";
     const sStart = new Date(src.start || "");
     if (Number.isNaN(sStart.getTime())) {
       throw new Error("copied event has no start time");
     }
-    const targetStart = src.all_day
-      ? new Date(day.getFullYear(), day.getMonth(), day.getDate())
-      : new Date(
-          day.getFullYear(),
-          day.getMonth(),
-          day.getDate(),
-          sStart.getHours(),
-          sStart.getMinutes(),
-        );
+    // Config-driven: keep wall time in event's timezone
+    let targetStart: Date;
+    if (src.all_day) {
+      const dayDt = DateTime.fromJSDate(day, { zone: tz }).startOf("day");
+      targetStart = dayDt.toJSDate();
+    } else {
+      const sDt = DateTime.fromJSDate(sStart, { zone: tz });
+      const dayDt = DateTime.fromJSDate(day, { zone: tz });
+      const targetDt = dayDt.set({ hour: sDt.hour, minute: sDt.minute, second: 0, millisecond: 0 });
+      targetStart = targetDt.toJSDate();
+    }
     let durMs = 60 * 60 * 1000;
     if (src.end) {
       const sEnd = new Date(src.end);
@@ -588,10 +602,10 @@ export default function App() {
       summary: src.title,
       description: src.description,
       location: src.location,
-      dtstart: toDraftWallClock(targetStart, src.all_day),
-      dtend: toDraftWallClock(targetEnd, src.all_day),
+      dtstart: toDraftWallClock(targetStart, src.all_day, tz),
+      dtend: toDraftWallClock(targetEnd, src.all_day, tz),
       all_day: src.all_day,
-      timezone: config?.locale.timezone || "Europe/Stockholm",
+      timezone: tz,
       rrule: null,
       alarms: src.alarms,
       attendees: [],
@@ -614,10 +628,11 @@ export default function App() {
   function handleEventMount(info: EventMountArg) {
     const ev = info.event.extendedProps.calEvent as CalEvent | undefined;
     if (!ev) return;
-    const tz = config?.locale.time_24h ?? true;
+    const is24h = config?.locale.time_24h ?? true;
+    const tz = config?.locale.timezone || "Europe/Stockholm";
     info.el.setAttribute(
       "aria-label",
-      ev.all_day ? ev.title : `${eventTimeLabel(ev, tz)}, ${ev.title}`,
+      ev.all_day ? ev.title : `${eventTimeLabel(ev, is24h, tz)}, ${ev.title}`,
     );
   }
 
@@ -627,11 +642,12 @@ export default function App() {
     const anchor: DayPopoverAnchor = r
       ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
       : { left: 0, top: 0, right: 0, bottom: 0 };
-    const key = dayKey(arg.date);
-    const timed = getTimedEventsForDayKey(visibleEvents, key).slice().sort((a, b) =>
+    const tz = config?.locale.timezone || "Europe/Stockholm";
+    const key = dayKey(arg.date, tz);
+    const timed = getTimedEventsForDayKey(visibleEvents, key, tz).slice().sort((a, b) =>
       (a.start || "").localeCompare(b.start || ""),
     );
-    const allDay = getAllDayEventsForDayKey(visibleEvents, key).slice().sort((a, b) =>
+    const allDay = getAllDayEventsForDayKey(visibleEvents, key, tz).slice().sort((a, b) =>
       (a.start || "").localeCompare(b.start || ""),
     );
     setDayPopover({ date: arg.date, events: [...allDay, ...timed], anchor });
@@ -646,6 +662,15 @@ export default function App() {
     calRef.current?.getApi().next();
   }
 
+  const systemTz = (() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+      return "";
+    }
+  })();
+  const tzMismatch = !!config && !!systemTz && systemTz !== config.locale.timezone;
+
   if (!ready) {
     return <div className="app" style={{ placeItems: "center", display: "grid" }}>Loading…</div>;
   }
@@ -657,6 +682,11 @@ export default function App() {
           <h1>Omarcal</h1>
           <p>
             {theme?.name || "omarchy"} · {config?.locale.timezone || "UTC"}
+            {tzMismatch && (
+              <span title={`System timezone ${systemTz} differs from calendar timezone ${config?.locale.timezone}. Times are shown in ${config?.locale.timezone}.`} style={{ color: "var(--muted)", fontSize: "0.7em" }}>
+                {" "}· system {systemTz}
+              </span>
+            )}
           </p>
         </div>
 
@@ -762,7 +792,9 @@ export default function App() {
               timeGridPlugin,
               multiMonthPlugin,
               interactionPlugin,
+              luxonPlugin,
             ]}
+            timeZone={config?.locale.timezone || "Europe/Stockholm"}
             initialView={view}
             headerToolbar={false}
             height="100%"
@@ -773,6 +805,12 @@ export default function App() {
             eventDurationEditable
             weekends
             firstDay={config?.locale.week_starts_on ?? 1}
+            slotMinTime="00:00:00"
+            slotMaxTime="24:00:00"
+            slotDuration="00:30:00"
+            slotLabelInterval="01:00:00"
+            scrollTime="08:00:00"
+            expandRows
             views={{
               timeGridWeek: {
                 weekNumbers: true,
@@ -785,8 +823,6 @@ export default function App() {
                 weekNumberFormat: { week: "numeric" },
               },
             }}
-            slotMinTime="06:00:00"
-            slotMaxTime="22:00:00"
             dayMaxEvents
             moreLinkClick={openDayPopover}
             eventTimeFormat={{

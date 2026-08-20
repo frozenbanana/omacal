@@ -104,8 +104,14 @@ fn build_events(db: &Db) -> Result<Vec<UiEvent>, String> {
                     }
                     _ => chrono::Duration::hours(1),
                 };
-                let occurrences =
-                    crate::ics::expand_rrule_occurrences(&start, &rrule, range_start, range_end);
+                // Prefer DST-safe wall+TZ expansion if raw contains TZID
+                let occurrences = crate::ics::expand_rrule_from_raw(
+                    &e.raw_ics,
+                    &start,
+                    &rrule,
+                    range_start,
+                    range_end,
+                );
                 if !occurrences.is_empty() {
                     for occ in occurrences {
                         let mut ui = to_ui(
@@ -243,7 +249,11 @@ pub async fn preview_ics(path: String) -> Result<ImportPreview, String> {
         p
     };
     let raw = std::fs::read_to_string(&p).map_err(|_| format!("could not read {p}"))?;
-    let parsed = ics::preview_from_ics(&raw).ok_or_else(|| "not a valid .ics event file".to_string())?;
+    let cfg = config::load_config().map_err(|e| e.to_string())?;
+    let default_tz = cfg.locale.timezone.parse::<chrono_tz::Tz>().ok();
+    let parsed = ics::preview_from_ics_with_tz(&raw, default_tz)
+        .or_else(|| ics::preview_from_ics(&raw))
+        .ok_or_else(|| "not a valid .ics event file".to_string())?;
     Ok(ImportPreview {
         summary: parsed.summary,
         description: parsed.description,
@@ -459,7 +469,9 @@ pub async fn save_event(state: State<'_, AppState>, input: EventInput) -> Result
         .push_event(&account, &cal.href, &href, &ics_body, etag.as_deref())
         .await?;
 
-    let parsed = ics::parse_ics(&ics_body, &account.addresses)
+    let default_tz = input.timezone.parse::<chrono_tz::Tz>().ok();
+    let parsed = ics::parse_ics_with_tz(&ics_body, &account.addresses, default_tz)
+        .or_else(|| ics::parse_ics(&ics_body, &account.addresses))
         .ok_or_else(|| "failed to parse built ics".to_string())?;
     let attendees_json = serde_json::to_string(&parsed.attendees).unwrap_or_else(|_| "[]".into());
     let alarms_json = serde_json::to_string(&parsed.alarms).unwrap_or_else(|_| "[]".into());
@@ -645,7 +657,17 @@ async fn apply_rsvp_on(
         )
         .await?;
 
-    let parsed = ics::parse_ics(&new_ics, &account.addresses)
+    let tz_hint = {
+        // try to extract TZID from the ICS, else use config timezone
+        let cfg_tz = cfg.locale.timezone.parse::<chrono_tz::Tz>().ok();
+        if let Some((_, Some(tz), _)) = ics::extract_wall_dt_and_tz(&new_ics, "DTSTART") {
+            Some(tz)
+        } else {
+            cfg_tz
+        }
+    };
+    let parsed = ics::parse_ics_with_tz(&new_ics, &account.addresses, tz_hint)
+        .or_else(|| ics::parse_ics(&new_ics, &account.addresses))
         .ok_or_else(|| "parse failed".to_string())?;
     let attendees_json = serde_json::to_string(&parsed.attendees).unwrap_or_else(|_| "[]".into());
     let alarms_json = serde_json::to_string(&parsed.alarms).unwrap_or_else(|_| "[]".into());

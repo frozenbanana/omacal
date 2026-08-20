@@ -15,7 +15,27 @@ impl SyncEngine {
     }
 
     pub async fn sync_all(&self, cfg: &AppConfig) -> Result<SyncReport, String> {
-        // One-time repair: VTIMEZONE RRULEs were stored as event rrules; PARTSTAT dupes
+        // One-time repair: VTIMEZONE RRULEs + floating TZ + dst-safe rrule
+        for ver in ["ics_vevent_parse_v1", "ics_tz_fix_v2"] {
+            if self.db.get_meta(ver).ok().flatten().as_deref() != Some("1") {
+                let mut addrs = std::collections::HashMap::new();
+                for a in &cfg.accounts {
+                    addrs.insert(a.id.clone(), a.addresses.clone());
+                }
+                let default_tz = cfg.locale.timezone.parse::<chrono_tz::Tz>().ok();
+                match self
+                    .db
+                    .repair_derived_ics_fields_with_tz(&addrs, default_tz)
+                {
+                    Ok(n) => {
+                        log::info!("repaired {ver} on {n} events");
+                        let _ = self.db.set_meta(ver, "1");
+                    }
+                    Err(e) => log::warn!("ICS repair {ver} failed: {e}"),
+                }
+            }
+        }
+        // Legacy single-ver path migration: ensure v1 is marked after v2
         if self
             .db
             .get_meta("ics_vevent_parse_v1")
@@ -24,22 +44,12 @@ impl SyncEngine {
             .as_deref()
             != Some("1")
         {
-            let mut addrs = std::collections::HashMap::new();
-            for a in &cfg.accounts {
-                addrs.insert(a.id.clone(), a.addresses.clone());
-            }
-            match self.db.repair_derived_ics_fields(&addrs) {
-                Ok(n) => {
-                    log::info!("repaired derived ICS fields on {n} events");
-                    let _ = self.db.set_meta("ics_vevent_parse_v1", "1");
-                }
-                Err(e) => log::warn!("ICS field repair failed: {e}"),
-            }
+            let _ = self.db.set_meta("ics_vevent_parse_v1", "1");
         }
 
         let mut report = SyncReport::default();
         for account in cfg.accounts.iter().filter(|a| a.enabled) {
-            match self.sync_account(account).await {
+            match self.sync_account(account, cfg).await {
                 Ok(r) => {
                     report.calendars += r.calendars;
                     report.objects += r.objects;
@@ -62,7 +72,7 @@ impl SyncEngine {
         Ok(report)
     }
 
-    pub async fn sync_account(&self, account: &AccountConfig) -> Result<SyncReport, String> {
+    pub async fn sync_account(&self, account: &AccountConfig, cfg: &AppConfig) -> Result<SyncReport, String> {
         let password = secrets::get_password(&account.id)?;
         let client = CalDavClient::new(&account.caldav_url, &account.username, &password)
             .map_err(|e| e.to_string())?;
@@ -123,7 +133,15 @@ impl SyncEngine {
                     continue;
                 }
                 let raw = obj.data.as_deref().unwrap();
-                if let Some(parsed) = ics::parse_ics(raw, &account.addresses) {
+                let default_tz = cfg
+                    .locale
+                    .timezone
+                    .parse::<chrono_tz::Tz>()
+                    .ok()
+                    .or_else(|| Some(ics::default_tz()));
+                if let Some(parsed) =
+                    ics::parse_ics_with_tz(raw, &account.addresses, default_tz)
+                {
                     let attendees_json =
                         serde_json::to_string(&parsed.attendees).unwrap_or_else(|_| "[]".into());
                     let alarms_json =

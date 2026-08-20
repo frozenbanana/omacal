@@ -34,7 +34,7 @@ fn tick(app: &AppHandle, db: &Db) -> anyhow::Result<()> {
         };
         // Expand simple non-recurring or use dtstart
         let starts = if let Some(rrule) = &ev.rrule {
-            ics::expand_rrule_occurrences(start_s, rrule, now - Duration::hours(1), horizon)
+            ics::expand_rrule_from_raw(&ev.raw_ics, start_s, rrule, now - Duration::hours(1), horizon)
         } else if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(start_s) {
             vec![dt.with_timezone(&Utc)]
         } else {

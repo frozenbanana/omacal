@@ -1,4 +1,5 @@
 import { FormEvent, useState } from "react";
+import { DateTime } from "luxon";
 import type { Calendar, EventInput } from "../store";
 
 type Props = {
@@ -19,8 +20,8 @@ export function EventEditor({ draft, calendars, timezone, title, onClose, onSave
     draft.calendar_id || writable[0]?.id || calendars[0]?.id,
   );
   const [allDay, setAllDay] = useState(!!draft.all_day);
-  const [dtstart, setDtstart] = useState(toLocalInput(draft.dtstart || "", !!draft.all_day));
-  const [dtend, setDtend] = useState(toLocalInput(draft.dtend || "", !!draft.all_day));
+  const [dtstart, setDtstart] = useState(toLocalInput(draft.dtstart || "", !!draft.all_day, timezone));
+  const [dtend, setDtend] = useState(toLocalInput(draft.dtend || "", !!draft.all_day, timezone));
   const [rrule, setRrule] = useState(draft.rrule || "");
   const [alarm, setAlarm] = useState(draft.alarms?.[0]?.trigger || "-PT15M");
   const [attendees, setAttendees] = useState(
@@ -182,9 +183,19 @@ export function EventEditor({ draft, calendars, timezone, title, onClose, onSave
   );
 }
 
-function toLocalInput(value: string, allDay: boolean): string {
+function toLocalInput(value: string, allDay: boolean, timeZone?: string): string {
   if (!value) return "";
   if (allDay) return value.slice(0, 10);
+  if (timeZone) {
+    const dt = DateTime.fromISO(value, { setZone: true });
+    if (dt.isValid) {
+      const zoned = dt.setZone(timeZone);
+      if (zoned.isValid) return zoned.toFormat("yyyy-MM-dd'T'HH:mm");
+    }
+    // fallback for wall strings without zone info
+    const dt2 = DateTime.fromISO(value, { zone: timeZone });
+    if (dt2.isValid) return dt2.toFormat("yyyy-MM-dd'T'HH:mm");
+  }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) {
     return value.slice(0, 16).replace(" ", "T");

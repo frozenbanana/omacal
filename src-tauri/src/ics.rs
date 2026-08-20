@@ -41,7 +41,21 @@ pub struct EventInput {
     pub etag: Option<String>,
 }
 
+pub fn default_tz() -> Tz {
+    "Europe/Stockholm".parse().unwrap_or(chrono_tz::UTC)
+}
+
+/// Public entry — uses default Stockholm TZ for floating times (legacy).
 pub fn parse_ics(raw: &str, my_addresses: &[String]) -> Option<ParsedEvent> {
+    parse_ics_with_tz(raw, my_addresses, Some(default_tz()))
+}
+
+/// Parse with an explicit default timezone for floating (no TZID, no Z) values.
+pub fn parse_ics_with_tz(
+    raw: &str,
+    my_addresses: &[String],
+    default_tz: Option<Tz>,
+) -> Option<ParsedEvent> {
     let cal: Calendar = raw.parse().ok()?;
     let event = cal.components.iter().find_map(|c| match c {
         CalendarComponent::Event(e) => Some(e),
@@ -56,12 +70,12 @@ pub fn parse_ics(raw: &str, my_addresses: &[String]) -> Option<ParsedEvent> {
     let location = event.get_location().unwrap_or("").to_string();
 
     let (dtstart, all_day) = match event.get_start() {
-        Some(s) => date_perhaps_to_strings(s),
-        None => extract_dt_from_raw(raw, "DTSTART"),
+        Some(s) => date_perhaps_to_strings_with_tz(s, default_tz),
+        None => extract_dt_from_raw_with_tz(raw, "DTSTART", default_tz),
     };
     let (dtend, _) = match event.get_end() {
-        Some(s) => date_perhaps_to_strings(s),
-        None => extract_dt_from_raw(raw, "DTEND"),
+        Some(s) => date_perhaps_to_strings_with_tz(s, default_tz),
+        None => extract_dt_from_raw_with_tz(raw, "DTEND", default_tz),
     };
 
     // RRULE/ORGANIZER/ATTENDEE must come from VEVENT — VTIMEZONE also has RRULE lines
@@ -101,30 +115,63 @@ pub fn preview_from_ics(raw: &str) -> Option<ParsedEvent> {
     parse_ics(raw, &[])
 }
 
+pub fn preview_from_ics_with_tz(raw: &str, default_tz: Option<Tz>) -> Option<ParsedEvent> {
+    parse_ics_with_tz(raw, &[], default_tz)
+}
+
 fn emails_equal(a: &str, b: &str) -> bool {
     let na = a.trim().trim_start_matches("mailto:").to_lowercase();
     let nb = b.trim().trim_start_matches("mailto:").to_lowercase();
     na == nb
 }
 
+#[allow(dead_code)]
 fn date_perhaps_to_strings(dt: DatePerhapsTime) -> (Option<String>, bool) {
+    date_perhaps_to_strings_with_tz(dt, Some(default_tz()))
+}
+
+fn date_perhaps_to_strings_with_tz(
+    dt: DatePerhapsTime,
+    default_tz: Option<Tz>,
+) -> (Option<String>, bool) {
     match dt {
         DatePerhapsTime::Date(d) => (Some(d.format("%Y-%m-%d").to_string()), true),
-        DatePerhapsTime::DateTime(cdt) => calendar_date_time_to_strings(cdt),
+        DatePerhapsTime::DateTime(cdt) => calendar_date_time_to_strings_with_tz(cdt, default_tz),
     }
 }
 
+#[allow(dead_code)]
 fn calendar_date_time_to_strings(dt: icalendar::CalendarDateTime) -> (Option<String>, bool) {
+    calendar_date_time_to_strings_with_tz(dt, Some(default_tz()))
+}
+
+fn calendar_date_time_to_strings_with_tz(
+    dt: icalendar::CalendarDateTime,
+    default_tz: Option<Tz>,
+) -> (Option<String>, bool) {
     use icalendar::CalendarDateTime as CDT;
     match dt {
-        CDT::Floating(ndt) => (
-            Some(DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc).to_rfc3339()),
-            false,
-        ),
+        CDT::Floating(ndt) => {
+            if let Some(tz) = default_tz {
+                if let Some(ldt) = tz.from_local_datetime(&ndt).single() {
+                    return (Some(ldt.with_timezone(&Utc).to_rfc3339()), false);
+                }
+                if let Some(ldt) = tz.from_local_datetime(&ndt).earliest() {
+                    return (Some(ldt.with_timezone(&Utc).to_rfc3339()), false);
+                }
+            }
+            (
+                Some(DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc).to_rfc3339()),
+                false,
+            )
+        }
         CDT::Utc(dt) => (Some(dt.to_rfc3339()), false),
         CDT::WithTimezone { date_time, tzid } => {
             if let Ok(tz) = tzid.parse::<Tz>() {
                 if let Some(ldt) = tz.from_local_datetime(&date_time).single() {
+                    return (Some(ldt.with_timezone(&Utc).to_rfc3339()), false);
+                }
+                if let Some(ldt) = tz.from_local_datetime(&date_time).earliest() {
                     return (Some(ldt.with_timezone(&Utc).to_rfc3339()), false);
                 }
             }
@@ -136,7 +183,16 @@ fn calendar_date_time_to_strings(dt: icalendar::CalendarDateTime) -> (Option<Str
     }
 }
 
+#[allow(dead_code)]
 fn extract_dt_from_raw(raw: &str, name: &str) -> (Option<String>, bool) {
+    extract_dt_from_raw_with_tz(raw, name, Some(default_tz()))
+}
+
+fn extract_dt_from_raw_with_tz(
+    raw: &str,
+    name: &str,
+    default_tz: Option<Tz>,
+) -> (Option<String>, bool) {
     for line in unfold(raw) {
         let upper = line.to_uppercase();
         if !upper.starts_with(name) {
@@ -154,6 +210,14 @@ fn extract_dt_from_raw(raw: &str, name: &str) -> (Option<String>, bool) {
                 return (Some(dt.with_timezone(&Utc).to_rfc3339()), false);
             }
             if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(val, "%Y%m%dT%H%M%S") {
+                if let Some(tz) = default_tz {
+                    if let Some(ldt) = tz.from_local_datetime(&ndt).single() {
+                        return (Some(ldt.with_timezone(&Utc).to_rfc3339()), false);
+                    }
+                    if let Some(ldt) = tz.from_local_datetime(&ndt).earliest() {
+                        return (Some(ldt.with_timezone(&Utc).to_rfc3339()), false);
+                    }
+                }
                 return (
                     Some(DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc).to_rfc3339()),
                     false,
@@ -162,6 +226,49 @@ fn extract_dt_from_raw(raw: &str, name: &str) -> (Option<String>, bool) {
         }
     }
     (None, false)
+}
+
+/// Extract wall (Naive) + TZID for a DTSTART/DTEND line from raw ICS.
+/// Returns (wall_naive, tz_option, is_all_day)
+pub fn extract_wall_dt_and_tz(raw: &str, prop: &str) -> Option<(chrono::NaiveDateTime, Option<Tz>, bool)> {
+    for line in unfold(raw) {
+        let upper = line.to_uppercase();
+        if !upper.starts_with(prop) {
+            continue;
+        }
+        if upper.contains("VALUE=DATE") {
+            continue;
+        }
+        if let Some(idx) = line.find(':') {
+            let left = &line[..idx];
+            let val = line[idx + 1..].trim();
+            // try to get TZID from params
+            let tz_opt = if let Some(tzid_idx) = left.to_uppercase().find("TZID=") {
+                let after = &left[tzid_idx + 5..];
+                let end = after.find(';').unwrap_or(after.len());
+                let tzid_raw = after[..end].trim_matches('"');
+                tzid_raw.parse::<Tz>().ok()
+            } else {
+                None
+            };
+            if val.ends_with('Z') {
+                if let Ok(dt) = DateTime::parse_from_str(val, "%Y%m%dT%H%M%SZ") {
+                    let utc = dt.with_timezone(&Utc);
+                    // convert to wall in that tz if available
+                    if let Some(tz) = tz_opt {
+                        return Some((utc.with_timezone(&tz).naive_local(), Some(tz), false));
+                    } else {
+                        // Z is UTC wall -> keep naive UTC
+                        return Some((utc.naive_utc(), None, false));
+                    }
+                }
+            }
+            if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(val, "%Y%m%dT%H%M%S") {
+                return Some((ndt, tz_opt, false));
+            }
+        }
+    }
+    None
 }
 
 fn property_in_vevent(raw: &str, name: &str) -> Option<String> {
@@ -591,6 +698,50 @@ pub fn set_partstat_in_ics(raw: &str, my_addresses: &[String], partstat: &str) -
     out_lines.join("\r\n") + "\r\n"
 }
 
+/// DST-safe expansion using wall time + TZID.
+/// If tz is Some, DTSTART is emitted with TZID so occurrences keep wall time
+/// across DST transitions (e.g. 06:00 Stockholm stays 06:00, UTC flips 04:00/05:00).
+pub fn expand_rrule_wall_tz(
+    wall_start: chrono::NaiveDateTime,
+    tz: Option<Tz>,
+    rrule: &str,
+    range_start: DateTime<Utc>,
+    range_end: DateTime<Utc>,
+) -> Vec<DateTime<Utc>> {
+    use rrule::RRuleSet;
+    let dtstart_line = if let Some(tz) = tz {
+        format!(
+            "DTSTART;TZID={}:{}",
+            tz.name(),
+            wall_start.format("%Y%m%dT%H%M%S")
+        )
+    } else {
+        format!("DTSTART:{}", wall_start.format("%Y%m%dT%H%M%S"))
+    };
+    let rule_str = if rrule.to_uppercase().starts_with("RRULE:") {
+        format!("{dtstart_line}\n{rrule}")
+    } else {
+        format!("{dtstart_line}\nRRULE:{rrule}")
+    };
+    let Ok(set) = rule_str.parse::<RRuleSet>() else {
+        // fallback: convert single wall to UTC
+        if let Some(tz) = tz {
+            if let Some(ldt) = tz.from_local_datetime(&wall_start).single().or_else(|| tz.from_local_datetime(&wall_start).earliest()) {
+                return vec![ldt.with_timezone(&Utc)];
+            }
+        }
+        return vec![DateTime::<Utc>::from_naive_utc_and_offset(wall_start, Utc)];
+    };
+    set.into_iter()
+        .skip_while(|d| d.with_timezone(&Utc) < range_start)
+        .take_while(|d| d.with_timezone(&Utc) <= range_end)
+        .take(500)
+        .map(|d| d.with_timezone(&Utc))
+        .collect()
+}
+
+/// Legacy UTC-based expansion — kept for tests / non-recurring fallback.
+/// For recurring wall-time events, prefer `expand_rrule_wall_tz`.
 pub fn expand_rrule_occurrences(
     dtstart_rfc: &str,
     rrule: &str,
@@ -622,6 +773,25 @@ pub fn expand_rrule_occurrences(
         .take(500)
         .map(|d| d.with_timezone(&Utc))
         .collect()
+}
+
+/// Try wall+TZ expansion from raw ICS; fallback to UTC.
+pub fn expand_rrule_from_raw(
+    raw: &str,
+    dtstart_rfc: &str,
+    rrule: &str,
+    range_start: DateTime<Utc>,
+    range_end: DateTime<Utc>,
+) -> Vec<DateTime<Utc>> {
+    if let Some((wall, tz, _)) = extract_wall_dt_and_tz(raw, "DTSTART") {
+        // Only use wall path if raw contains TZID or is floating wall time
+        // (i.e., we could reconstruct wall). For pure UTC (Z), keep UTC path.
+        let is_utc = raw.lines().any(|l| l.to_uppercase().contains("DTSTART") && l.contains("Z"));
+        if tz.is_some() || !is_utc {
+            return expand_rrule_wall_tz(wall, tz, rrule, range_start, range_end);
+        }
+    }
+    expand_rrule_occurrences(dtstart_rfc, rrule, range_start, range_end)
 }
 
 pub fn alarm_trigger_at(
@@ -714,7 +884,9 @@ END:VCALENDAR\r\n";
         assert_eq!(p.summary, "Standup");
         assert_eq!(p.location, "Meeting room");
         assert_eq!(p.description, "Daily sync");
-        assert_eq!(p.dtstart.as_deref(), Some("2026-09-14T09:00:00+00:00"));
+        // Floating 09:00 without TZ is interpreted as Europe/Stockholm.
+        // Sep 14 is CEST (UTC+2) => 07:00Z
+        assert_eq!(p.dtstart.as_deref(), Some("2026-09-14T07:00:00+00:00"));
         assert!(!p.all_day);
         assert_eq!(
             p.rrule.as_deref(),
@@ -764,6 +936,82 @@ END:VCALENDAR\r\n";
         let addrs = vec!["metahenry@metaprovide.org".into()];
         let parsed = parse_ics(TZ_AND_EVENT, &addrs).expect("parse");
         assert_eq!(parsed.my_partstat.as_deref(), Some("ACCEPTED"));
+    }
+
+    #[test]
+    fn nogi_morning_keeps_wall_0600_across_dst() {
+        const NOGI: &str = "BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+PRODID:-//Pegla Schedule//EN\r\n\
+BEGIN:VEVENT\r\n\
+UID:32a6496a-5088-4610-87a6-3a338560edbc@pegla.local\r\n\
+DTSTAMP:20260127T150000Z\r\n\
+DTSTART;TZID=Europe/Stockholm:20260126T060000\r\n\
+DTEND;TZID=Europe/Stockholm:20260126T070000\r\n\
+SUMMARY:NOGI Morning\r\n\
+RRULE:FREQ=WEEKLY;BYDAY=MO\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let parsed = parse_ics(NOGI, &[]).expect("parse");
+        // Jan 26 winter CET UTC+1 => 05:00Z
+        assert_eq!(
+            parsed.dtstart.as_deref(),
+            Some("2026-01-26T05:00:00+00:00"),
+            "winter: {:?}",
+            parsed.dtstart
+        );
+        let tz: Tz = "Europe/Stockholm".parse().unwrap();
+        let range_start = "2026-08-17T00:00:00+00:00"
+            .parse::<DateTime<Utc>>()
+            .unwrap();
+        let range_end = "2026-08-17T23:59:59+00:00"
+            .parse::<DateTime<Utc>>()
+            .unwrap();
+        let occ = expand_rrule_from_raw(
+            NOGI,
+            parsed.dtstart.as_deref().unwrap(),
+            parsed.rrule.as_deref().unwrap(),
+            range_start,
+            range_end,
+        );
+        assert_eq!(occ.len(), 1, "occ={:?}", occ);
+        let local = occ[0].with_timezone(&tz);
+        assert_eq!(
+            local.format("%H:%M").to_string(),
+            "06:00",
+            "summer wall should stay 06:00, got {} (UTC {})",
+            local.format("%Y-%m-%d %H:%M %Z"),
+            occ[0]
+        );
+        // August 06:00 CEST => 04:00Z
+        assert_eq!(occ[0].to_rfc3339(), "2026-08-17T04:00:00+00:00");
+
+        // Check legacy UTC expansion would drift to 07:00
+        let old = expand_rrule_occurrences(
+            parsed.dtstart.as_deref().unwrap(),
+            parsed.rrule.as_deref().unwrap(),
+            range_start,
+            range_end,
+        );
+        let old_local = old[0].with_timezone(&tz);
+        assert_eq!(old_local.format("%H:%M").to_string(), "07:00");
+    }
+
+    #[test]
+    fn floating_is_treated_as_stockholm() {
+        const ICS: &str = "BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:float-1\r\n\
+DTSTAMP:20260801T120000Z\r\n\
+DTSTART:20260914T090000\r\n\
+DTEND:20260914T100000\r\n\
+SUMMARY:Standup\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let p = parse_ics(ICS, &[]).expect("parse");
+        // Sep 14 CEST => 07:00Z
+        assert_eq!(p.dtstart.as_deref(), Some("2026-09-14T07:00:00+00:00"));
     }
 
     #[test]

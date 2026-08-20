@@ -646,6 +646,14 @@ impl Db {
         &self,
         addresses_by_account: &std::collections::HashMap<String, Vec<String>>,
     ) -> anyhow::Result<usize> {
+        self.repair_derived_ics_fields_with_tz(addresses_by_account, None)
+    }
+
+    pub fn repair_derived_ics_fields_with_tz(
+        &self,
+        addresses_by_account: &std::collections::HashMap<String, Vec<String>>,
+        default_tz: Option<chrono_tz::Tz>,
+    ) -> anyhow::Result<usize> {
         let rows: Vec<(i64, i64, String, String)> = {
             let conn = self.conn.lock().unwrap();
             let mut stmt = conn.prepare(
@@ -668,29 +676,44 @@ impl Db {
                 .get(&account_id)
                 .map(|v| v.as_slice())
                 .unwrap_or(&[]);
-            let Some(parsed) = crate::ics::parse_ics(&raw, addrs) else {
+            let parsed_opt = if let Some(tz) = default_tz {
+                crate::ics::parse_ics_with_tz(&raw, addrs, Some(tz))
+            } else {
+                crate::ics::parse_ics(&raw, addrs)
+            };
+            let Some(parsed) = parsed_opt else {
                 continue;
             };
             let attendees_json =
                 serde_json::to_string(&parsed.attendees).unwrap_or_else(|_| "[]".into());
             let conn = self.conn.lock().unwrap();
+            // Also repair dtstart/dtend that were mis-parsed as UTC for floating/TZID
             let changed = conn.execute(
                 r#"
                 UPDATE objects SET
-                    rrule = ?1,
-                    my_partstat = ?2,
-                    attendees_json = ?3,
-                    organizer = ?4,
-                    status = ?5
-                WHERE id = ?6 AND (
-                    IFNULL(rrule, '') != IFNULL(?1, '') OR
-                    IFNULL(my_partstat, '') != IFNULL(?2, '') OR
-                    attendees_json != ?3 OR
-                    IFNULL(organizer, '') != IFNULL(?4, '') OR
-                    IFNULL(status, '') != IFNULL(?5, '')
+                    dtstart = ?1,
+                    dtend = ?2,
+                    all_day = ?3,
+                    rrule = ?4,
+                    my_partstat = ?5,
+                    attendees_json = ?6,
+                    organizer = ?7,
+                    status = ?8
+                WHERE id = ?9 AND (
+                    IFNULL(dtstart, '') != IFNULL(?1, '') OR
+                    IFNULL(dtend, '') != IFNULL(?2, '') OR
+                    all_day != ?3 OR
+                    IFNULL(rrule, '') != IFNULL(?4, '') OR
+                    IFNULL(my_partstat, '') != IFNULL(?5, '') OR
+                    attendees_json != ?6 OR
+                    IFNULL(organizer, '') != IFNULL(?7, '') OR
+                    IFNULL(status, '') != IFNULL(?8, '')
                 )
                 "#,
                 params![
+                    parsed.dtstart,
+                    parsed.dtend,
+                    parsed.all_day as i32,
                     parsed.rrule,
                     parsed.my_partstat,
                     attendees_json,

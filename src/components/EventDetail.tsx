@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { DateTime } from "luxon";
+import { useApp } from "../store";
 import type { CalEvent } from "../store";
 
 type Props = {
@@ -35,6 +37,7 @@ export function EventDetail({ event, onClose, onEdit, onDelete, onRsvp }: Props)
   const [error, setError] = useState<string>();
   const current = (event.my_partstat || "").toUpperCase();
   const canRsvp = !!event.my_partstat;
+  const tz = useApp((s) => s.config?.locale.timezone) || "Europe/Stockholm";
 
   async function changeRsvp(partstat: string) {
     if (busy || partstat === current) return;
@@ -59,7 +62,7 @@ export function EventDetail({ event, onClose, onEdit, onDelete, onRsvp }: Props)
             <div>
               {event.all_day
                 ? `${event.start} → ${event.end || ""}`
-                : `${format(event.start)} → ${format(event.end)}`}
+                : `${format(event.start, tz)} → ${format(event.end, tz)}`}
             </div>
           </div>
           <div>
@@ -167,8 +170,15 @@ export function EventDetail({ event, onClose, onEdit, onDelete, onRsvp }: Props)
   );
 }
 
-function format(v?: string | null) {
+function format(v?: string | null, timeZone?: string) {
   if (!v) return "—";
+  if (timeZone) {
+    const dt = DateTime.fromISO(v, { setZone: true });
+    if (dt.isValid) {
+      const zoned = dt.setZone(timeZone);
+      if (zoned.isValid) return zoned.toLocaleString(DateTime.DATETIME_MED);
+    }
+  }
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return v;
   return d.toLocaleString();

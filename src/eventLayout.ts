@@ -1,14 +1,17 @@
 import type { CalEvent } from "./store";
+import { DateTime } from "luxon";
 
 // ---------------------------------------------------------------------------
 // Shared calendar event layout helpers.
 //
-// All date math is LOCAL-time (browser timezone == app rendering timezone,
-// matching how FullCalendar renders without an explicit `timeZone` option).
+// Config-driven timezone: when `timeZone` is provided (e.g. "Europe/Stockholm"),
+// all wall-time calculations use that IANA zone via Luxon, matching
+// FullCalendar's `timeZone` plugin. Without it we fall back to browser LOCAL
+// time (legacy, and current Vitest TZ=Europe/Stockholm).
 // All-day events are stored as date-only "YYYY-MM-DD" strings by the backend;
-// those are interpreted as LOCAL calendar dates (never UTC) to avoid
-// off-by-one day shifts. Day arithmetic uses calendar fields (y/m/d), not raw
-// milliseconds, so DST transitions cannot break day counting.
+// those are interpreted as calendar dates in the target zone (never UTC) to
+// avoid off-by-one day shifts. Day arithmetic uses calendar fields (y/m/d), not
+// raw milliseconds, so DST transitions cannot break day counting.
 // ---------------------------------------------------------------------------
 
 const MS_DAY = 86400000;
@@ -22,54 +25,92 @@ export function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
 
-/** Local calendar-day key "YYYY-MM-DD".  */
-export function dayKey(d: Date): string {
+/** Calendar-day key "YYYY-MM-DD" in target zone (or local if omitted). */
+export function dayKey(d: Date, timeZone?: string): string {
+  if (timeZone) {
+    const dt = DateTime.fromJSDate(d, { zone: timeZone });
+    if (dt.isValid) return dt.toFormat("yyyy-MM-dd");
+  }
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-/** Local midnight for a Date. */
-export function toLocalMidnight(d: Date): Date {
+/** Midnight for a Date in target zone (or local). */
+export function toLocalMidnight(d: Date, timeZone?: string): Date {
+  if (timeZone) {
+    const dt = DateTime.fromJSDate(d, { zone: timeZone }).startOf("day");
+    if (dt.isValid) return dt.toJSDate();
+  }
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
-/** Local-noon timestamp for a day key (avoids DST midnight ambiguity). */
-export function parseDayKey(key: string): Date {
+/** Noon timestamp for a day key (avoids DST midnight ambiguity) — zone-aware. */
+export function parseDayKey(key: string, timeZone?: string): Date {
   const [y, m, d] = key.split("-").map(Number);
+  if (timeZone) {
+    const dt = DateTime.fromObject({ year: y, month: m, day: d, hour: 12 }, { zone: timeZone });
+    if (dt.isValid) return dt.toJSDate();
+  }
   return new Date(y, m - 1, d, 12, 0, 0, 0);
 }
 
-/** Add days using local calendar arithmetic (DST-safe). */
-export function addCalendarDays(date: Date, n: number): Date {
+/** Add days using calendar arithmetic in zone (DST-safe). */
+export function addCalendarDays(date: Date, n: number, timeZone?: string): Date {
+  if (timeZone) {
+    const dt = DateTime.fromJSDate(date, { zone: timeZone }).plus({ days: n }).startOf("day");
+    if (dt.isValid) return dt.toJSDate();
+  }
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + n);
 }
 
 /** DST-safe whole-calendar-day difference between two dates. */
-export function calendarDaysBetween(a: Date, b: Date): number {
+export function calendarDaysBetween(a: Date, b: Date, timeZone?: string): number {
+  if (timeZone) {
+    const da = DateTime.fromJSDate(a, { zone: timeZone });
+    const db = DateTime.fromJSDate(b, { zone: timeZone });
+    if (da.isValid && db.isValid) {
+      const ua = Date.UTC(da.year, da.month - 1, da.day);
+      const ub = Date.UTC(db.year, db.month - 1, db.day);
+      return Math.round((ub - ua) / MS_DAY);
+    }
+  }
   const ua = Date.UTC(a.getFullYear(), a.getMonth(), a.getDate());
   const ub = Date.UTC(b.getFullYear(), b.getMonth(), b.getDate());
   return Math.round((ub - ua) / MS_DAY);
 }
 
-export function addDayKey(key: string, n = 1): string {
-  return dayKey(addCalendarDays(parseDayKey(key), n));
+export function addDayKey(key: string, n = 1, timeZone?: string): string {
+  return dayKey(addCalendarDays(parseDayKey(key, timeZone), n, timeZone), timeZone);
 }
 
 /**
- * Parse a backend event start/end string into a local Date.
- * All-day date-only strings become LOCAL midnight; anything else is parsed as
- * an ISO instant and its local components are used (matches FC behaviour).
+ * Parse a backend event start/end string into a Date.
+ * All-day date-only strings become midnight in the target zone; anything else
+ * is parsed as an ISO instant and its zone-adjusted components are used
+ * (matches FullCalendar timeZone behaviour).
  */
 export function parseLocalDate(
   value: string | null | undefined,
   allDay: boolean,
+  timeZone?: string,
 ): Date | null {
   if (!value) return null;
   const m = DATE_RE.exec(value.trim());
   if (m && allDay) {
+    if (timeZone) {
+      const dt = DateTime.fromObject(
+        { year: +m[1], month: +m[2], day: +m[3], hour: 0, minute: 0, second: 0 },
+        { zone: timeZone },
+      );
+      if (dt.isValid) return dt.toJSDate();
+    }
     return new Date(+m[1], +m[2] - 1, +m[3], 0, 0, 0, 0);
   }
+  // For timed, keep instant but caller should use timeZone-aware formatters
   const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d;
+  if (Number.isNaN(d.getTime())) return null;
+  // If timeZone is set, the Date instant is the same; dayKey/eventTimeLabel
+  // will convert via Luxon. No need to shift here.
+  return d;
 }
 
 /**
@@ -81,47 +122,51 @@ export function parseLocalDate(
  */
 export function eventShowDays(
   ev: CalEvent,
+  timeZone?: string,
 ): { startKey: string; endKey: string } | null {
-  const start = parseLocalDate(ev.start, ev.all_day);
+  const start = parseLocalDate(ev.start, ev.all_day, timeZone);
   if (!start) return null;
 
-  const parsedEnd = parseLocalDate(ev.end, ev.all_day);
+  const parsedEnd = parseLocalDate(ev.end, ev.all_day, timeZone);
   const endExclusive =
     parsedEnd && parsedEnd.getTime() > start.getTime()
       ? parsedEnd
       : ev.all_day
-        ? addCalendarDays(start, 1)
+        ? addCalendarDays(start, 1, timeZone)
         : new Date(start.getTime() + 60 * 60 * 1000);
 
-  const startKey = dayKey(start);
+  const startKey = dayKey(start, timeZone);
   let endKey: string;
   if (ev.all_day) {
-    endKey = dayKey(addCalendarDays(endExclusive, -1));
+    endKey = dayKey(addCalendarDays(endExclusive, -1, timeZone), timeZone);
   } else {
-    // last occupied day = local day of (end - 1ms)
-    endKey = dayKey(toLocalMidnight(new Date(endExclusive.getTime() - 1)));
+    // last occupied day = zone day of (end - 1ms)
+    endKey = dayKey(
+      toLocalMidnight(new Date(endExclusive.getTime() - 1), timeZone),
+      timeZone,
+    );
   }
   if (endKey < startKey) endKey = startKey;
   return { startKey, endKey };
 }
 
-/** Every local day key an event occupies. */
-export function occupiedDayKeys(ev: CalEvent): string[] {
-  const b = eventShowDays(ev);
+/** Every zone day key an event occupies. */
+export function occupiedDayKeys(ev: CalEvent, timeZone?: string): string[] {
+  const b = eventShowDays(ev, timeZone);
   if (!b) return [];
   const keys: string[] = [];
   let cur = b.startKey;
   while (cur <= b.endKey) {
     keys.push(cur);
-    cur = addDayKey(cur, 1);
+    cur = addDayKey(cur, 1, timeZone);
   }
   return keys;
 }
 
-export function isEventOnDay(ev: CalEvent, date: Date): boolean {
-  const b = eventShowDays(ev);
+export function isEventOnDay(ev: CalEvent, date: Date, timeZone?: string): boolean {
+  const b = eventShowDays(ev, timeZone);
   if (!b) return false;
-  const k = dayKey(date);
+  const k = dayKey(date, timeZone);
   return k >= b.startKey && k <= b.endKey;
 }
 
@@ -129,11 +174,11 @@ export function isAllDayEvent(ev: CalEvent): boolean {
   return ev.all_day;
 }
 
-/** Group events by the local day keys they occupy. Input must already be calendar-filtered. */
-export function groupEventsByDay(events: CalEvent[]): Map<string, CalEvent[]> {
+/** Group events by the zone day keys they occupy. Input must already be calendar-filtered. */
+export function groupEventsByDay(events: CalEvent[], timeZone?: string): Map<string, CalEvent[]> {
   const byDay = new Map<string, CalEvent[]>();
   for (const ev of events) {
-    for (const k of occupiedDayKeys(ev)) {
+    for (const k of occupiedDayKeys(ev, timeZone)) {
       const list = byDay.get(k);
       if (list) list.push(ev);
       else byDay.set(k, [ev]);
@@ -142,38 +187,38 @@ export function groupEventsByDay(events: CalEvent[]): Map<string, CalEvent[]> {
   return byDay;
 }
 
-function eventOccursOnKey(ev: CalEvent, key: string): boolean {
-  const b = eventShowDays(ev);
+function eventOccursOnKey(ev: CalEvent, key: string, timeZone?: string): boolean {
+  const b = eventShowDays(ev, timeZone);
   return !!b && key >= b.startKey && key <= b.endKey;
 }
 
-export function getTimedEventsForDayKey(events: CalEvent[], key: string): CalEvent[] {
-  return events.filter((e) => !e.all_day && eventOccursOnKey(e, key));
+export function getTimedEventsForDayKey(events: CalEvent[], key: string, timeZone?: string): CalEvent[] {
+  return events.filter((e) => !e.all_day && eventOccursOnKey(e, key, timeZone));
 }
 
-export function getTimedEventsForDate(events: CalEvent[], date: Date): CalEvent[] {
-  return getTimedEventsForDayKey(events, dayKey(date));
+export function getTimedEventsForDate(events: CalEvent[], date: Date, timeZone?: string): CalEvent[] {
+  return getTimedEventsForDayKey(events, dayKey(date, timeZone), timeZone);
 }
 
-export function getAllDayEventsForDayKey(events: CalEvent[], key: string): CalEvent[] {
-  return events.filter((e) => e.all_day && eventOccursOnKey(e, key));
+export function getAllDayEventsForDayKey(events: CalEvent[], key: string, timeZone?: string): CalEvent[] {
+  return events.filter((e) => e.all_day && eventOccursOnKey(e, key, timeZone));
 }
 
-export function getAllDayEventsForDate(events: CalEvent[], date: Date): CalEvent[] {
-  return getAllDayEventsForDayKey(events, dayKey(date));
+export function getAllDayEventsForDate(events: CalEvent[], date: Date, timeZone?: string): CalEvent[] {
+  return getAllDayEventsForDayKey(events, dayKey(date, timeZone), timeZone);
 }
 
-export function getEventCountForDate(events: CalEvent[], date: Date): number {
-  const k = dayKey(date);
+export function getEventCountForDate(events: CalEvent[], date: Date, timeZone?: string): number {
+  const k = dayKey(date, timeZone);
   let n = 0;
-  for (const ev of events) if (eventOccursOnKey(ev, k)) n += 1;
+  for (const ev of events) if (eventOccursOnKey(ev, k, timeZone)) n += 1;
   return n;
 }
 
 /** Count of events on a day's key. */
-export function getEventCountForDayKey(events: CalEvent[], key: string): number {
+export function getEventCountForDayKey(events: CalEvent[], key: string, timeZone?: string): number {
   let n = 0;
-  for (const ev of events) if (eventOccursOnKey(ev, key)) n += 1;
+  for (const ev of events) if (eventOccursOnKey(ev, key, timeZone)) n += 1;
   return n;
 }
 
@@ -202,10 +247,18 @@ export interface WeekSeg {
   lane: number;
 }
 
-export function startOfWeek(date: Date, weekStartsOn = DEFAULT_WEEK_STARTS_ON): Date {
-  const d = toLocalMidnight(date);
-  const diff = (d.getDay() - weekStartsOn + 7) % 7;
-  return addCalendarDays(d, -diff);
+export function startOfWeek(date: Date, weekStartsOn = DEFAULT_WEEK_STARTS_ON, timeZone?: string): Date {
+  const d = toLocalMidnight(date, timeZone);
+  let weekday: number;
+  if (timeZone) {
+    const dt = DateTime.fromJSDate(d, { zone: timeZone });
+    weekday = dt.weekday % 7; // 1=Mon ..7=Sun -> 0=Sun
+    if (weekday === 7) weekday = 0;
+  } else {
+    weekday = d.getDay();
+  }
+  const off = (weekday - weekStartsOn + 7) % 7;
+  return addCalendarDays(d, -off, timeZone);
 }
 
 /**
@@ -285,12 +338,13 @@ export function layoutMultiDayEventsForWeek(
 export function eventDensityForDate(
   events: CalEvent[],
   date: Date,
+  timeZone?: string,
 ): { count: number; colors: string[] } {
-  const k = dayKey(date);
+  const k = dayKey(date, timeZone);
   const colors: string[] = [];
   let count = 0;
   for (const ev of events) {
-    if (!eventOccursOnKey(ev, k)) continue;
+    if (!eventOccursOnKey(ev, k, timeZone)) continue;
     count += 1;
     if (colors.length < 3 && !colors.includes(ev.color)) colors.push(ev.color);
   }
@@ -301,12 +355,23 @@ export function eventDensityForDate(
 // Formatting
 // ---------------------------------------------------------------------------
 
-export function eventTimeLabel(ev: CalEvent, time24h: boolean): string {
+export function eventTimeLabel(ev: CalEvent, time24h: boolean, timeZone?: string): string {
   if (ev.all_day) return "";
-  const start = parseLocalDate(ev.start, false);
+  if (timeZone) {
+    const dt = ev.start ? DateTime.fromISO(ev.start, { setZone: true }).setZone(timeZone) : null;
+    if (dt && dt.isValid) {
+      if (time24h) return dt.toFormat("HH:mm");
+      return dt.toFormat("h:mm a");
+    }
+  }
+  const start = parseLocalDate(ev.start, false, timeZone);
   if (!start) return "";
-  const h = start.getHours();
-  const m = start.getMinutes();
+  const h = timeZone
+    ? DateTime.fromJSDate(start, { zone: timeZone }).hour
+    : start.getHours();
+  const m = timeZone
+    ? DateTime.fromJSDate(start, { zone: timeZone }).minute
+    : start.getMinutes();
   if (time24h) return `${pad2(h)}:${pad2(m)}`;
   const period = h >= 12 ? "PM" : "AM";
   const h12 = h % 12 || 12;
