@@ -18,7 +18,8 @@ helper.
 - Native CalDAV sync: discovery, `sync-collection`, ETag-aware writes
 - Create / edit / delete events, drag-move and resize
 - All-day events and **config-driven timezone** — wall times stay `06:00` across CET/CEST, DST-safe
-- Recurrence (RRULE) expanded with wall-time semantics (e.g. weekly `06:00 Stockholm` stays `06:00`, `04:00Z` summer / `05:00Z` winter)
+- Recurrence with **structured builder** (Daily / Weekly / Weekdays, interval + ends never/on/after) and **instance delete** (This event / This & future / Entire series via `EXDATE`/`UNTIL`)
+- Recurrence expanded with wall-time semantics (e.g. weekly `06:00 Stockholm` stays `06:00`, `04:00Z` summer / `05:00Z` winter)
 - Full-day timeline `00:00–24:00` with scroll to `08:00`, no clipping of night events
 - Reminders → desktop notifications (Mako)
 - Attendees + Accept / Maybe / Decline for pending invites
@@ -161,7 +162,8 @@ React UI --invoke--> Commands --> Db (SQLite)
 
 - Source of truth for an event is `raw_ics`; index columns (`dtstart` as UTC RFC3339, etc.) are derived.
 - Timed events stored as UTC, but **floating** `DTSTART:20260126T060000` is interpreted as `config.locale.timezone` (`Europe/Stockholm` by default). `WithTimezone` `DTSTART;TZID=...:20260126T060000` is converted via `chrono-tz`.
-- Recurring events keep wall time across DST: expansion uses `DTSTART;TZID=…:wall` via `rrule` so `06:00 Stockholm` is `05:00Z` winter / `04:00Z` summer (auto-repaired on next sync via `ics_tz_fix_v2`).
+- Recurring events keep wall time across DST: expansion uses `DTSTART;TZID=…:wall` via `rrule` so `06:00 Stockholm` is `05:00Z` winter / `04:00Z` summer (auto-repaired on next sync via `ics_tz_fix_v2`). `EXDATE` (single occurrence delete) and `UNTIL` truncation (this & future) are filtered during expansion.
+- Editing a recurring instance edits the **entire series** (v1) — `master_start` is kept so DTSTART doesn’t shift to the clicked occurrence.
 - Background loops: theme watcher, alarm notifications, interval sync, tray.
 - Single-instance guard forwards opened `.ics` files to the running app.
 - Full-day week view: `slotMinTime 00:00–24:00`, `slotDuration 00:30`, `scrollTime 08:00`, `expandRows`, `timeZone = config.locale.timezone` via Luxon.

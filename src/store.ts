@@ -56,6 +56,8 @@ export type CalEvent = {
   alarms: Alarm[];
   my_partstat?: string | null;
   readonly: boolean;
+  master_start?: string | null;
+  master_end?: string | null;
 };
 
 export type Account = {
@@ -362,6 +364,10 @@ export async function takePendingImports(): Promise<string[]> {
 
 export async function deleteEvent(id: number) {
   return safeInvoke("delete_event", { id });
+}
+
+export async function deleteEventOccurrence(id: number, occurrenceStart: string, mode: "single" | "future" | "all") {
+  return safeInvoke("delete_event_occurrence", { req: { id, occurrence_start: occurrenceStart, mode } });
 }
 
 export async function respondInvite(eventId: number, partstat: string) {

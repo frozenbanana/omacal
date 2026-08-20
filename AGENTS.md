@@ -34,6 +34,8 @@ omarcal/
     components/
       EventEditor.tsx
       EventDetail.tsx
+      RepeatBuilder.tsx     # Structured repeat UI (FREQ/INTERVAL/BYDAY/UNTIL/COUNT)
+      ConfirmRecurrenceDelete.tsx # Delete-instance dialog (single/future/series)
       SettingsModal.tsx     # Accounts / CalDAV wizard
   src-tauri/
     src/
@@ -144,7 +146,7 @@ Defined in `commands.rs`, registered in `lib.rs`:
 | `sync_now` | Full sync |
 | `list_calendars` / `set_calendar_visible` / `set_calendar_color` | Calendar chrome |
 | `list_events` / `search_events` / `pending_invites` / `next_event` | Queries |
-| `save_event` / `delete_event` | CRUD + CalDAV PUT/DELETE |
+| `save_event` / `delete_event` / `delete_event_occurrence` | CRUD + CalDAV PUT/DELETE (occurrence handles `single`/`future`/`all` via `EXDATE`/`UNTIL`) |
 | `respond_invite` | PARTSTAT update + PUT |
 | `freebusy` | Best-effort free-busy REPORT |
 
@@ -198,7 +200,7 @@ Tables (see `db.rs` migrate):
 
 Writes: build/update ICS → `DTSTART;TZID=timezone:wall` → CalDAV PUT with If-Match ETag → re-parse with `input.timezone` → upsert local row.
 
-Recurrence: expand with `rrule` crate for UI/alarms (`build_events` / `alarms.rs`). Occurrence UIDs may be `uid::timestamp`; strip `::…` before save/edit.
+Recurrence: expand with `rrule` crate for UI/alarms (`build_events` / `alarms.rs`). Occurrence UIDs may be `uid::timestamp`; strip `::…` before save/edit. Editing a recurring instance edits the master (v1, `master_start` kept); deleting offers `single` (`EXDATE;TZID=...`), `future` (`UNTIL` truncation) or `all` (`DELETE`). `RepeatBuilder` handles `FREQ=DAILY|WEEKLY`, `INTERVAL`, `BYDAY`, `UNTIL`/`COUNT` with tiny custom parser (no `rrule.js`).
 
 ## Frontend conventions
 
@@ -206,6 +208,8 @@ Recurrence: expand with `rrule` crate for UI/alarms (`build_events` / `alarms.rs
 - Views: FullCalendar (`dayGridMonth`, `timeGridWeek`, `timeGridDay`, `multiMonthYear`) + `@fullcalendar/luxon3`.
 - **Timezone is config-driven:** `<FullCalendar timeZone={config.locale.timezone}>` via Luxon (`Europe/Stockholm` default). Helpers in `eventLayout.ts`/`App.tsx`/`EventEditor.tsx` all take `timeZone` via `luxon.DateTime` — don’t fall back to `new Date().getHours()` alone. System tz mismatch shows `· system <Zone>` in sidebar.
 - **Timeline is full-day:** `slotMinTime 00:00:00 – slotMaxTime 24:00:00`, `slotDuration 00:30`, `slotLabelInterval 01:00`, `scrollTime 08:00:00`, `expandRows`. Don’t regress to `06-22`.
+- **Repeat:** `RepeatBuilder.tsx` is the single source for `FREQ/INTERVAL/BYDAY/UNTIL/COUNT` — keep raw `RRULE` string as stored value, parse/build via tiny custom parser (not `rrule.js`). All-day vs timed handled via `allDay` flag.
+- **Recurring edit/delete:** Editing an instance edits the master (v1); `master_start` is kept so DTSTART doesn’t shift. Deleting shows `ConfirmRecurrenceDelete` (single=`EXDATE`, future=`UNTIL`, all=`DELETE`). Drag of recurring is disabled (`editable: !rrule`) to avoid BYDAY drift.
 - Theme: CSS variables `--bg`, `--fg`, `--accent`, `--color0`… from Omarchy; no hardcoded purple/cream AI palettes.
 - Fonts: monospace stack (JetBrains Mono / Iosevka / Cascadia) to fit Omarchy.
 - Shortcuts: `n` new, `e` edit, `t` today, arrows navigate (ignore when typing in inputs).

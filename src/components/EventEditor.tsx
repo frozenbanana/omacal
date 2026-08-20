@@ -1,17 +1,19 @@
 import { FormEvent, useState } from "react";
 import { DateTime } from "luxon";
 import type { Calendar, EventInput } from "../store";
+import { RepeatBuilder } from "./RepeatBuilder";
 
 type Props = {
   draft: Partial<EventInput> & { id?: number };
   calendars: Calendar[];
   timezone: string;
   title?: string;
+  isRecurringInstance?: boolean;
   onClose: () => void;
   onSave: (input: EventInput) => Promise<void>;
 };
 
-export function EventEditor({ draft, calendars, timezone, title, onClose, onSave }: Props) {
+export function EventEditor({ draft, calendars, timezone, title, isRecurringInstance, onClose, onSave }: Props) {
   const [summary, setSummary] = useState(draft.summary || "");
   const [description, setDescription] = useState(draft.description || "");
   const [location, setLocation] = useState(draft.location || "");
@@ -22,7 +24,7 @@ export function EventEditor({ draft, calendars, timezone, title, onClose, onSave
   const [allDay, setAllDay] = useState(!!draft.all_day);
   const [dtstart, setDtstart] = useState(toLocalInput(draft.dtstart || "", !!draft.all_day, timezone));
   const [dtend, setDtend] = useState(toLocalInput(draft.dtend || "", !!draft.all_day, timezone));
-  const [rrule, setRrule] = useState(draft.rrule || "");
+  const [rrule, setRrule] = useState<string | null>(draft.rrule || null);
   const [alarm, setAlarm] = useState(draft.alarms?.[0]?.trigger || "-PT15M");
   const [attendees, setAttendees] = useState(
     (draft.attendees || []).map((a) => a.email).join(", "),
@@ -57,7 +59,7 @@ export function EventEditor({ draft, calendars, timezone, title, onClose, onSave
         dtend: fromLocalInput(dtend, allDay),
         all_day: allDay,
         timezone,
-        rrule: rrule.trim() || null,
+        rrule: rrule?.trim() || null,
         alarms: alarm ? [{ trigger: alarm, description: "Reminder" }] : [],
         attendees: attendeeList,
         href: draft.href,
@@ -78,6 +80,11 @@ export function EventEditor({ draft, calendars, timezone, title, onClose, onSave
         onSubmit={submit}
       >
         <h2>{title ?? (draft.uid ? "Edit event" : "New event")}</h2>
+        {isRecurringInstance && draft.rrule && (
+          <div className="muted" style={{ fontSize: "0.75rem", border: "1px solid var(--border)", borderRadius: 6, padding: "0.45rem 0.55rem", background: "color-mix(in srgb, var(--accent) 6%, var(--bg))" }}>
+            This is one occurrence of a repeating event. Changes here will affect the <strong>entire series</strong>. To change only this day, delete this occurrence and create a new single event.
+          </div>
+        )}
         <div className="form-grid">
           <label>
             Title
@@ -141,14 +148,7 @@ export function EventEditor({ draft, calendars, timezone, title, onClose, onSave
               onChange={(e) => setDescription(e.target.value)}
             />
           </label>
-          <label>
-            Repeat (RRULE)
-            <input
-              placeholder="FREQ=WEEKLY;BYDAY=MO,WE"
-              value={rrule}
-              onChange={(e) => setRrule(e.target.value)}
-            />
-          </label>
+          <RepeatBuilder rrule={rrule} dtstart={dtstart} allDay={allDay} timezone={timezone} onChange={setRrule} />
           <label>
             Reminder
             <select value={alarm} onChange={(e) => setAlarm(e.target.value)}>

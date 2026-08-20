@@ -2,6 +2,7 @@ import { useState } from "react";
 import { DateTime } from "luxon";
 import { useApp } from "../store";
 import type { CalEvent } from "../store";
+import { humanize, parseRRule } from "./RepeatBuilder";
 
 type Props = {
   event: CalEvent;
@@ -94,7 +95,13 @@ export function EventDetail({ event, onClose, onEdit, onDelete, onRsvp }: Props)
           {event.rrule && (
             <div>
               <div className="muted">Repeats</div>
-              <div>{event.rrule}</div>
+              <div>
+                {(() => {
+                  const parsed = parseRRule(event.rrule, event.start || "", tz);
+                  return parsed ? humanize(parsed, tz) : event.rrule;
+                })()}
+                <div className="muted" style={{ fontSize: "0.68rem" }}>{event.rrule}</div>
+              </div>
             </div>
           )}
           {event.organizer && (

@@ -4,6 +4,7 @@ use crate::ics::{self, EventInput};
 use crate::secrets;
 use crate::sync::{SyncEngine, SyncReport};
 use crate::theme::{self, ThemeColors};
+use chrono::TimeZone;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tauri::State;
@@ -49,6 +50,9 @@ pub struct UiEvent {
     pub alarms: Vec<AlarmInfo>,
     pub my_partstat: Option<String>,
     pub readonly: bool,
+    /// For expanded recurring occurrences, the master DTSTART (UTC RFC3339 or date). Used for editing series.
+    pub master_start: Option<String>,
+    pub master_end: Option<String>,
 }
 
 fn to_ui(ev: EventRow, cal: Option<&CalendarRow>) -> UiEvent {
@@ -64,10 +68,10 @@ fn to_ui(ev: EventRow, cal: Option<&CalendarRow>) -> UiEvent {
         title: ev.summary,
         description: ev.description,
         location: ev.location,
-        start: ev.dtstart,
-        end: ev.dtend,
+        start: ev.dtstart.clone(),
+        end: ev.dtend.clone(),
         all_day: ev.all_day,
-        rrule: ev.rrule,
+        rrule: ev.rrule.clone(),
         color: cal.map(|c| c.color.clone()).unwrap_or_else(|| "#829dd4".into()),
         calendar_name: cal
             .map(|c| c.displayname.clone())
@@ -78,6 +82,8 @@ fn to_ui(ev: EventRow, cal: Option<&CalendarRow>) -> UiEvent {
         alarms,
         my_partstat: ev.my_partstat,
         readonly: cal.map(|c| c.readonly).unwrap_or(false),
+        master_start: ev.dtstart,
+        master_end: ev.dtend,
     }
 }
 
@@ -122,6 +128,9 @@ fn build_events(db: &Db) -> Result<Vec<UiEvent>, String> {
                             },
                             cal.as_ref(),
                         );
+                        // keep master start/end for editing series
+                        ui.master_start = e.dtstart.clone();
+                        ui.master_end = e.dtend.clone();
                         // unique id for FC: keep base id, encode occurrence in uid display
                         ui.uid = format!("{}::{}", e.uid, occ.timestamp());
                         out.push(ui);
@@ -537,6 +546,196 @@ pub async fn delete_event(state: State<'_, AppState>, id: i64) -> Result<(), Str
     state
         .db
         .delete_object_by_id(id)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[derive(Deserialize)]
+pub struct DeleteOccurrenceRequest {
+    pub id: i64,
+    pub occurrence_start: String, // RFC3339 for timed, YYYY-MM-DD for all-day
+    pub mode: String,             // "single" | "future" | "all"
+}
+
+#[tauri::command]
+pub async fn delete_event_occurrence(
+    state: State<'_, AppState>,
+    req: DeleteOccurrenceRequest,
+) -> Result<(), String> {
+    if req.mode == "all" {
+        return delete_event(state, req.id).await;
+    }
+    let cfg = config::load_config().map_err(|e| e.to_string())?;
+    let row = state
+        .db
+        .get_object(req.id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "event not found".to_string())?;
+    if row.rrule.is_none() {
+        // Not recurring — fallback to full delete
+        return delete_event(state, req.id).await;
+    }
+    let cal = state
+        .db
+        .get_calendar(row.calendar_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "calendar not found".to_string())?;
+    if cal.readonly {
+        return Err("calendar is read-only".into());
+    }
+    let account = cfg
+        .accounts
+        .iter()
+        .find(|a| a.id == cal.account_id)
+        .ok_or_else(|| "account not found".to_string())?
+        .clone();
+
+    // Parse occurrence instant
+    let parsed_occ = if req.occurrence_start.contains('T') {
+        chrono::DateTime::parse_from_rfc3339(&req.occurrence_start)
+            .map(|d| d.with_timezone(&chrono::Utc))
+            .or_else(|_| {
+                chrono::NaiveDateTime::parse_from_str(&req.occurrence_start, "%Y-%m-%dT%H:%M:%S")
+                    .map(|n| chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(n, chrono::Utc))
+            })
+            .or_else(|_| {
+                chrono::NaiveDateTime::parse_from_str(&req.occurrence_start, "%Y-%m-%d %H:%M:%S")
+                    .map(|n| chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(n, chrono::Utc))
+            })
+            .map_err(|_| format!("cannot parse occurrence_start {}", req.occurrence_start))?
+    } else {
+        // All-day date
+        let d = chrono::NaiveDate::parse_from_str(&req.occurrence_start[..10.min(req.occurrence_start.len())], "%Y-%m-%d")
+            .map_err(|_| format!("cannot parse occurrence date {}", req.occurrence_start))?;
+        let ndt = d.and_hms_opt(0, 0, 0).unwrap();
+        // Use calendar tz for all-day wall
+        let tz = row.raw_ics.lines().find(|l| l.to_uppercase().contains("DTSTART")).and_then(|_| {
+            ics::extract_wall_dt_and_tz(&row.raw_ics, "DTSTART").and_then(|(_, tz, _)| tz)
+        }).or_else(|| cfg.locale.timezone.parse::<chrono_tz::Tz>().ok());
+        if let Some(tz) = tz {
+            if let Some(ldt) = tz.from_local_datetime(&ndt).single().or_else(|| tz.from_local_datetime(&ndt).earliest()) {
+                ldt.with_timezone(&chrono::Utc)
+            } else {
+                chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(ndt, chrono::Utc)
+            }
+        } else {
+            chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(ndt, chrono::Utc)
+        }
+    };
+
+    let new_raw = match req.mode.as_str() {
+        "single" => {
+            // Detect DTSTART tz for EXDATE form
+            let dtstart_tz = ics::extract_wall_dt_and_tz(&row.raw_ics, "DTSTART").and_then(|(_, tz, _)| tz);
+            ics::inject_exdate(&row.raw_ics, parsed_occ, dtstart_tz)
+        }
+        "future" => {
+            // UNTIL = occurrence - 1s (excludes this and future)
+            let until_utc = parsed_occ - chrono::Duration::seconds(1);
+            let dtstart_info = ics::extract_wall_dt_and_tz(&row.raw_ics, "DTSTART");
+            let until_tz = dtstart_info.and_then(|(_, tz, _)| tz).or_else(|| cfg.locale.timezone.parse::<chrono_tz::Tz>().ok());
+            // For all-day we want date-only UNTIL (occurrence date -1)
+            if row.all_day {
+                let until_date = (parsed_occ - chrono::Duration::days(1)).date_naive();
+                let until_wall = until_date.and_hms_opt(0, 0, 0).unwrap();
+                ics::truncate_rrule_until(&row.raw_ics, until_wall, None, true)
+            } else if let Some(tz) = until_tz {
+                let until_wall = until_utc.with_timezone(&tz).naive_local();
+                ics::truncate_rrule_until(&row.raw_ics, until_wall, Some(tz), false)
+            } else {
+                let until_wall = until_utc.naive_utc();
+                ics::truncate_rrule_until(&row.raw_ics, until_wall, None, false)
+            }
+        }
+        _ => return Err(format!("unknown mode {}", req.mode)),
+    };
+
+    // If future truncate results in UNTIL before DTSTART, treat as delete entire series
+    if req.mode == "future" {
+        // Quick check: parse DTSTART wall and compare
+        if let Some((wall_start, tz, _)) = ics::extract_wall_dt_and_tz(&new_raw, "DTSTART") {
+            // Extract UNTIL
+            let until_opt = {
+                let mut found = None;
+                for line in new_raw.lines() {
+                    let up = line.to_uppercase();
+                    if up.starts_with("RRULE") {
+                        if let Some(idx) = up.find("UNTIL=") {
+                            let after = &line[idx + 6..];
+                            let end = after.find(';').unwrap_or(after.len());
+                            found = Some(after[..end].trim());
+                        }
+                    }
+                }
+                found.map(|s| s.to_string())
+            };
+            if let Some(until_s) = until_opt {
+                let until_utc = if until_s.ends_with('Z') {
+                    chrono::DateTime::parse_from_str(&until_s, "%Y%m%dT%H%M%SZ").ok().map(|d| d.with_timezone(&chrono::Utc))
+                } else if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(&until_s, "%Y%m%dT%H%M%S") {
+                    if let Some(tz) = tz {
+                        tz.from_local_datetime(&ndt).single().or_else(|| tz.from_local_datetime(&ndt).earliest()).map(|ldt| ldt.with_timezone(&chrono::Utc))
+                    } else {
+                        Some(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(ndt, chrono::Utc))
+                    }
+                } else if let Ok(d) = chrono::NaiveDate::parse_from_str(&until_s, "%Y%m%d") {
+                    let ndt = d.and_hms_opt(0,0,0).unwrap();
+                    if let Some(tz) = tz {
+                        tz.from_local_datetime(&ndt).single().or_else(|| tz.from_local_datetime(&ndt).earliest()).map(|ldt| ldt.with_timezone(&chrono::Utc))
+                    } else {
+                        Some(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(ndt, chrono::Utc))
+                    }
+                } else { None };
+                if let (Some(u), Some(start_utc)) = (until_utc, {
+                    if let Some(tz) = tz {
+                        tz.from_local_datetime(&wall_start).single().or_else(|| tz.from_local_datetime(&wall_start).earliest()).map(|ldt| ldt.with_timezone(&chrono::Utc))
+                    } else {
+                        Some(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(wall_start, chrono::Utc))
+                    }
+                }) {
+                    if u < start_utc {
+                        // No occurrences left — delete entire series
+                        return delete_event(state, req.id).await;
+                    }
+                }
+            }
+        }
+    }
+
+    let new_etag = state
+        .sync
+        .push_event(&account, &cal.href, &row.href, &new_raw, row.etag.as_deref())
+        .await?;
+
+    let tz_hint = ics::extract_wall_dt_and_tz(&new_raw, "DTSTART")
+        .and_then(|(_, tz, _)| tz)
+        .or_else(|| cfg.locale.timezone.parse::<chrono_tz::Tz>().ok());
+    let parsed = ics::parse_ics_with_tz(&new_raw, &account.addresses, tz_hint)
+        .or_else(|| ics::parse_ics(&new_raw, &account.addresses))
+        .ok_or_else(|| "parse failed after exdate/truncate".to_string())?;
+    let attendees_json = serde_json::to_string(&parsed.attendees).unwrap_or_else(|_| "[]".into());
+    let alarms_json = serde_json::to_string(&parsed.alarms).unwrap_or_else(|_| "[]".into());
+    state
+        .db
+        .upsert_object(
+            cal.id,
+            &row.href,
+            new_etag.as_deref().or(row.etag.as_deref()),
+            &parsed.uid,
+            &parsed.summary,
+            &parsed.description,
+            &parsed.location,
+            parsed.dtstart.as_deref(),
+            parsed.dtend.as_deref(),
+            parsed.all_day,
+            parsed.rrule.as_deref(),
+            &new_raw,
+            parsed.status.as_deref(),
+            parsed.organizer.as_deref(),
+            &attendees_json,
+            &alarms_json,
+            parsed.my_partstat.as_deref(),
+        )
         .map_err(|e| e.to_string())?;
     Ok(())
 }

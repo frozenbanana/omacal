@@ -20,6 +20,7 @@ import "./App.css";
 import {
   bootListeners,
   deleteEvent,
+  deleteEventOccurrence,
   previewIcs,
   respondInvite,
   saveEvent,
@@ -42,6 +43,7 @@ import { CalendarSidebar } from "./components/CalendarSidebar";
 import { InvitesPanel } from "./components/InvitesPanel";
 import { DayPopover, type DayPopoverAnchor } from "./components/DayPopover";
 import { YearView } from "./components/YearView";
+import { ConfirmRecurrenceDelete } from "./components/ConfirmRecurrenceDelete";
 
 function isInvite(e: CalEvent): boolean {
   return e.my_partstat === "NEEDS-ACTION";
@@ -82,6 +84,7 @@ function toFcEvents(events: CalEvent[], marked: CalEvent | null): FCEventInput[]
     const statusClass = partstatClass(e);
     const isMarked =
       marked != null && e.id === marked.id && e.start === marked.start;
+    const isRecurringEvent = !!e.rrule;
     const base: FCEventInput = {
       id: `${e.id}:${e.start}`,
       title: e.title || "(no title)",
@@ -90,11 +93,13 @@ function toFcEvents(events: CalEvent[], marked: CalEvent | null): FCEventInput[]
       allDay: e.all_day,
       backgroundColor: invite ? "transparent" : e.color,
       borderColor: e.color,
-      editable: !e.readonly && !invite,
+      // v1: recurring series can be edited via dialog, not dragged (avoids BYDAY shift ambiguity)
+      editable: !e.readonly && !invite && !isRecurringEvent,
       classNames: [
         e.all_day ? "om-allday" : "om-timed",
         ...(statusClass ? [statusClass] : []),
         ...(isMarked ? ["om-marked"] : []),
+        ...(isRecurringEvent ? ["om-recurring"] : []),
       ],
       extendedProps: { calEvent: e, invite },
     };
@@ -150,11 +155,70 @@ export default function App() {
   const [lastClickedDay, setLastClickedDay] = useState<Date | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimer = useRef<number | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<CalEvent | null>(null);
+  const [editingInstance, setEditingInstance] = useState(false);
 
   function showNotice(msg: string) {
     setNotice(msg);
     if (noticeTimer.current != null) window.clearTimeout(noticeTimer.current);
     noticeTimer.current = window.setTimeout(() => setNotice(null), 1800);
+  }
+
+  function isRecurring(ev: CalEvent): boolean {
+    return !!ev.rrule;
+  }
+  function isInstance(ev: CalEvent): boolean {
+    return ev.uid.includes("::");
+  }
+
+  function requestDelete(ev: CalEvent) {
+    if (ev.readonly) {
+      showNotice("Read-only, cannot delete");
+      return;
+    }
+    if (!isRecurring(ev)) {
+      // Single event — delete immediately
+      const id = ev.id;
+      if (selected?.id === ev.id) setSelected(null);
+      if (marked?.id === ev.id) setMarked(null);
+      void (async () => {
+        try {
+          await deleteEvent(id);
+          await load();
+          showNotice("Deleted");
+        } catch (e) {
+          useApp.setState({ error: String(e) });
+        }
+      })();
+      return;
+    }
+    // Recurring — show choice
+    setPendingDelete(ev);
+  }
+
+  async function doDeleteOccurrence(mode: "single" | "future" | "all") {
+    const ev = pendingDelete;
+    if (!ev) return;
+    const id = ev.id;
+    const occurrence = ev.start || "";
+    setPendingDelete(null);
+    if (selected?.id === ev.id && selected.start === ev.start) setSelected(null);
+    if (marked?.id === ev.id && marked.start === ev.start) setMarked(null);
+    try {
+      if (mode === "all") {
+        await deleteEvent(id);
+      } else {
+        if (!occurrence) {
+          await deleteEvent(id);
+        } else {
+          await deleteEventOccurrence(id, occurrence, mode);
+        }
+      }
+      await load();
+      showNotice(mode === "single" ? "Removed one occurrence" : mode === "future" ? "Truncated series" : "Deleted series");
+    } catch (e) {
+      useApp.setState({ error: String(e) });
+    }
   }
 
   useEffect(() => {
@@ -203,14 +267,23 @@ export default function App() {
           showNotice("Read-only, cannot cut");
           return;
         }
+        if (isRecurring(marked)) {
+          showNotice("Cannot cut recurring event — duplicate instead");
+          return;
+        }
         setClipboard(marked);
-        const id = marked.id;
+        const evMarked = marked;
         setMarked(null);
         void (async () => {
           try {
-            await deleteEvent(id);
-            await load();
-            showNotice("Moved to clipboard");
+            // cut is delete original
+            if (isRecurring(evMarked)) {
+              requestDelete(evMarked);
+            } else {
+              await deleteEvent(evMarked.id);
+              await load();
+              showNotice("Moved to clipboard");
+            }
           } catch (e) {
             useApp.setState({ error: String(e) });
           }
@@ -239,17 +312,9 @@ export default function App() {
           showNotice("Read-only, cannot delete");
           return;
         }
-        const id = marked.id;
+        const evMarked = marked;
         setMarked(null);
-        void (async () => {
-          try {
-            await deleteEvent(id);
-            await load();
-            showNotice("Deleted");
-          } catch (e) {
-            useApp.setState({ error: String(e) });
-          }
-        })();
+        requestDelete(evMarked);
       } else if (ev.key === "ArrowLeft" && !ev.metaKey && !ev.ctrlKey) {
         calRef.current?.getApi().prev();
       } else if (ev.key === "ArrowRight" && !ev.metaKey && !ev.ctrlKey) {
@@ -431,6 +496,7 @@ export default function App() {
     const s = start || new Date();
     const e = end || new Date(s.getTime() + 60 * 60 * 1000);
     setEditorTitle(undefined);
+    setEditingInstance(false);
     const tz = config?.locale.timezone || "Europe/Stockholm";
     setEditorDraft({
       calendar_id: firstWritable.id,
@@ -449,7 +515,16 @@ export default function App() {
 
   function openEdit(ev: CalEvent) {
     const baseUid = ev.uid.includes("::") ? ev.uid.split("::")[0] : ev.uid;
-    setEditorTitle(undefined);
+    const isInst = isInstance(ev);
+    const isRec = isRecurring(ev);
+    setEditingInstance(isInst && isRec);
+    if (isRec && isInst) {
+      setEditorTitle("Edit recurring event — changes affect entire series");
+    } else {
+      setEditorTitle(undefined);
+    }
+    // For series edit, use master_start so DTSTART doesn't shift to occurrence date
+    const useMaster = isRec && ev.master_start;
     setEditorDraft({
       id: ev.id,
       calendar_id: ev.calendar_id,
@@ -457,8 +532,8 @@ export default function App() {
       summary: ev.title,
       description: ev.description,
       location: ev.location,
-      dtstart: ev.start || "",
-      dtend: ev.end || ev.start || "",
+      dtstart: (useMaster ? ev.master_start : ev.start) || ev.start || "",
+      dtend: (useMaster ? ev.master_end : ev.end) || ev.end || ev.start || "",
       all_day: ev.all_day,
       timezone: config?.locale.timezone || "Europe/Stockholm",
       rrule: ev.rrule,
@@ -862,9 +937,9 @@ export default function App() {
           onClose={() => setSelected(null)}
           onEdit={() => openEdit(selected)}
           onDelete={async () => {
-            await deleteEvent(selected.id);
+            const ev = selected;
             setSelected(null);
-            await load();
+            requestDelete(ev);
           }}
           onRsvp={async (partstat) => {
             await respondInvite(selected.id, partstat);
@@ -899,6 +974,7 @@ export default function App() {
           calendars={calendars.filter((c) => c.subscribed !== false)}
           timezone={config?.locale.timezone || "Europe/Stockholm"}
           title={editorTitle}
+          isRecurringInstance={editingInstance}
           onClose={() => setShowEditor(false)}
           onSave={async (input) => {
             await saveEvent(input);
@@ -910,6 +986,17 @@ export default function App() {
 
       {showSettings && (
         <SettingsModal onClose={() => setShowSettings(false)} />
+      )}
+
+      {pendingDelete && (
+        <ConfirmRecurrenceDelete
+          isInstance={isInstance(pendingDelete)}
+          title={pendingDelete.title}
+          onClose={() => setPendingDelete(null)}
+          onDeleteSingle={() => doDeleteOccurrence("single")}
+          onDeleteFuture={() => doDeleteOccurrence("future")}
+          onDeleteSeries={() => doDeleteOccurrence("all")}
+        />
       )}
     </div>
   );

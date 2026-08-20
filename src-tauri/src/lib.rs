@@ -114,6 +114,7 @@ pub fn run() {
             commands::pending_invites,
             commands::save_event,
             commands::delete_event,
+            commands::delete_event_occurrence,
             commands::respond_invite,
             commands::respond_invites_bulk,
             commands::next_event,
