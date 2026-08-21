@@ -255,6 +255,27 @@ export default function App() {
     }
   }, [ready]);
 
+  // Safety net: if load hangs (e.g. CSP or invoke blocked), force-hide splash after 5s
+  // so the app never appears frozen. User will see the error banner instead.
+  useEffect(() => {
+    if (ready) return;
+    const t = window.setTimeout(() => {
+      if (!useApp.getState().ready) {
+        console.error("[omacal] load timeout — forcing ready");
+        const splash = document.getElementById("splash");
+        if (splash) {
+          splash.classList.add("hidden");
+          window.setTimeout(() => splash.remove(), 300);
+        }
+        useApp.setState({
+          ready: true,
+          error: useApp.getState().error || "Load timeout — check terminal / RUST_LOG",
+        });
+      }
+    }, 5000);
+    return () => window.clearTimeout(t);
+  }, [ready]);
+
   useEffect(() => {
     if (pendingImport) {
       openImport(pendingImport);
