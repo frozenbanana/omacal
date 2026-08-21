@@ -20,7 +20,7 @@ export function InvitesPanel() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [status, setStatus] = useState<string>();
 
-  const now = useMemo(() => Date.now(), [pending]);
+  const now = useMemo(() => Date.now(), []);
 
   const { upcoming, past, filtered } = useMemo(() => {
     const upcoming: CalEvent[] = [];

@@ -25,7 +25,7 @@ export function CalendarSidebar() {
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [dragOverId, setDragOverId] = useState<number | null>(null);
 
-  const accounts = config?.accounts ?? [];
+  const accounts = useMemo(() => config?.accounts ?? [], [config?.accounts]);
 
   const groups = useMemo(() => {
     const byAccount = new Map<string, Calendar[]>();

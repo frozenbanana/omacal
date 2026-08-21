@@ -240,6 +240,7 @@ export default function App() {
         }
       }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
 
   // Fade out the inline splash once the app is ready.
@@ -259,6 +260,7 @@ export default function App() {
       openImport(pendingImport);
       setPendingImport(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingImport]);
 
   const fcEvents = useMemo(() => toFcEvents(events, marked), [events, marked]);
@@ -425,6 +427,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     selected,
     calendars,
