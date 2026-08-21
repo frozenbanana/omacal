@@ -48,6 +48,12 @@ jobs:
             librsvg2-dev \
             patchelf \
             xdg-utils
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
         with:
