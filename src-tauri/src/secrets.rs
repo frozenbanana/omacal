@@ -18,8 +18,8 @@ pub fn get_password(account_id: &str) -> Result<String, String> {
         Ok(pw) => Ok(pw),
         Err(keyring::Error::NoEntry) => {
             // Fallback to legacy omarcal service and migrate
-            let legacy = Entry::new(LEGACY_SERVICE, &password_key(account_id))
-                .map_err(|e| e.to_string())?;
+            let legacy =
+                Entry::new(LEGACY_SERVICE, &password_key(account_id)).map_err(|e| e.to_string())?;
             match legacy.get_password() {
                 Ok(pw) => {
                     let _ = entry.set_password(&pw);
