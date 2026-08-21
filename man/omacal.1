@@ -1,0 +1,52 @@
+.TH OMACAL 1 "August 2026" "omacal 0.3.0" "User Commands"
+.SH NAME
+omacal \- Omarchy-native CalDAV calendar
+.SH SYNOPSIS
+.B omacal
+.RI [ options "] [" file.ics "]"
+.SH DESCRIPTION
+.B omacal
+is a fast, local-first desktop calendar for Omarchy / Arch / Hyprland.
+It syncs natively with Nextcloud CalDAV (not vdirsyncer), stores events
+local-first in SQLite, keeps passwords in the system keyring, and reloads
+the active Omarchy theme live.
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Show help (Tauri window).
+.TP
+.BR file.ics
+Open an \fI.ics\fR file in Omacal (also via \fBtext/calendar\fR MIME handler).
+Imports are previewed; picking a calendar and saving creates a new event.
+.SH FILES
+.TP
+.I ~/.config/omacal/config.toml
+Accounts and locale (URLs, usernames, addresses; never passwords).
+.TP
+.I ~/.local/share/omacal/omacal.db
+SQLite store (calendars, objects, alarm_log, meta).
+.TP
+.I ~/.local/state/omarchy/current/theme/colors.toml
+Active Omarchy theme (fallback \fI~/.config/omarchy/current/theme/colors.toml\fR).
+.TP
+.I ~/.config/hypr/omacal.conf
+Optional Hyprland floating rule; or \fIpackaging/hypr/omacal.lua\fR via \fIlooknfeel.lua\fR.
+.TP
+.I ~/.config/systemd/user/omacal.service
+User daemon (also aliased \fIomacal-daemon.service\fR).
+.SH ENVIRONMENT
+.TP
+.B OMACAL_START_HIDDEN=1
+Start with the window hidden (tray/daemon mode).
+.TP
+.B RUST_LOG
+Log level (\fIinfo\fR recommended for the daemon).
+.SH SEE ALSO
+.BR hyprland (1),
+.BR systemctl (1),
+.BR omarchy-omacal (1),
+.BR omacal-waybar (1)
+.SH AUTHOR
+Henry Bergstrom <https://github.com/frozenbanana/omacal>
+.SH LICENSE
+MIT

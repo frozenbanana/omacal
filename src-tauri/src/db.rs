@@ -67,12 +67,26 @@ impl Db {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        // Migrate legacy omarcal DB if new doesn't exist
+        if !path.exists() {
+            if let Some(data_dir) = dirs::data_dir() {
+                let legacy = data_dir.join("omarcal").join("omarcal.db");
+                if legacy.exists() {
+                    let _ = std::fs::copy(&legacy, path);
+                }
+            }
+        }
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         let db = Self {
             conn: Mutex::new(conn),
         };
         db.migrate()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        }
         Ok(db)
     }
 
@@ -201,7 +215,14 @@ impl Db {
                              THEN excluded.color ELSE calendars.color END,
                 readonly = excluded.readonly
             "#,
-            params![account_id, href, displayname, color, readonly as i32, next_order],
+            params![
+                account_id,
+                href,
+                displayname,
+                color,
+                readonly as i32,
+                next_order
+            ],
         )?;
         let id: i64 = conn.query_row(
             "SELECT id FROM calendars WHERE account_id = ?1 AND href = ?2",
@@ -246,10 +267,7 @@ impl Db {
     pub fn set_calendar_subscribed(&self, id: i64, subscribed: bool) -> anyhow::Result<()> {
         let conn = self.conn.lock().unwrap();
         if !subscribed {
-            conn.execute(
-                "DELETE FROM objects WHERE calendar_id = ?1",
-                params![id],
-            )?;
+            conn.execute("DELETE FROM objects WHERE calendar_id = ?1", params![id])?;
             // Clear sync token so a later resubscribe does a full fetch
             conn.execute(
                 "UPDATE calendars SET subscribed = 0, sync_token = NULL, visible = 0 WHERE id = ?1",
@@ -324,11 +342,9 @@ impl Db {
 
     fn get_meta_unlocked(conn: &Connection, key: &str) -> anyhow::Result<Option<String>> {
         let v = conn
-            .query_row(
-                "SELECT value FROM meta WHERE key = ?1",
-                params![key],
-                |r| r.get(0),
-            )
+            .query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| {
+                r.get(0)
+            })
             .optional()?;
         Ok(v)
     }
@@ -364,6 +380,7 @@ impl Db {
         Ok(row)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn upsert_object(
         &self,
         calendar_id: i64,
@@ -613,11 +630,9 @@ impl Db {
     pub fn get_meta(&self, key: &str) -> anyhow::Result<Option<String>> {
         let conn = self.conn.lock().unwrap();
         let v = conn
-            .query_row(
-                "SELECT value FROM meta WHERE key = ?1",
-                params![key],
-                |r| r.get(0),
-            )
+            .query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| {
+                r.get(0)
+            })
             .optional()?;
         Ok(v)
     }
@@ -664,9 +679,7 @@ impl Db {
                 "#,
             )?;
             let mapped = stmt
-                .query_map([], |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-                })?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
                 .collect::<Result<Vec<_>, _>>()?;
             mapped
         };

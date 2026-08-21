@@ -91,7 +91,7 @@ export function addDayKey(key: string, n = 1, timeZone?: string): string {
 export function parseLocalDate(
   value: string | null | undefined,
   allDay: boolean,
-  timeZone?: string,
+  timeZone?: string
 ): Date | null {
   if (!value) return null;
   const m = DATE_RE.exec(value.trim());
@@ -99,7 +99,7 @@ export function parseLocalDate(
     if (timeZone) {
       const dt = DateTime.fromObject(
         { year: +m[1], month: +m[2], day: +m[3], hour: 0, minute: 0, second: 0 },
-        { zone: timeZone },
+        { zone: timeZone }
       );
       if (dt.isValid) return dt.toJSDate();
     }
@@ -122,7 +122,7 @@ export function parseLocalDate(
  */
 export function eventShowDays(
   ev: CalEvent,
-  timeZone?: string,
+  timeZone?: string
 ): { startKey: string; endKey: string } | null {
   const start = parseLocalDate(ev.start, ev.all_day, timeZone);
   if (!start) return null;
@@ -141,10 +141,7 @@ export function eventShowDays(
     endKey = dayKey(addCalendarDays(endExclusive, -1, timeZone), timeZone);
   } else {
     // last occupied day = zone day of (end - 1ms)
-    endKey = dayKey(
-      toLocalMidnight(new Date(endExclusive.getTime() - 1), timeZone),
-      timeZone,
-    );
+    endKey = dayKey(toLocalMidnight(new Date(endExclusive.getTime() - 1), timeZone), timeZone);
   }
   if (endKey < startKey) endKey = startKey;
   return { startKey, endKey };
@@ -192,19 +189,35 @@ function eventOccursOnKey(ev: CalEvent, key: string, timeZone?: string): boolean
   return !!b && key >= b.startKey && key <= b.endKey;
 }
 
-export function getTimedEventsForDayKey(events: CalEvent[], key: string, timeZone?: string): CalEvent[] {
+export function getTimedEventsForDayKey(
+  events: CalEvent[],
+  key: string,
+  timeZone?: string
+): CalEvent[] {
   return events.filter((e) => !e.all_day && eventOccursOnKey(e, key, timeZone));
 }
 
-export function getTimedEventsForDate(events: CalEvent[], date: Date, timeZone?: string): CalEvent[] {
+export function getTimedEventsForDate(
+  events: CalEvent[],
+  date: Date,
+  timeZone?: string
+): CalEvent[] {
   return getTimedEventsForDayKey(events, dayKey(date, timeZone), timeZone);
 }
 
-export function getAllDayEventsForDayKey(events: CalEvent[], key: string, timeZone?: string): CalEvent[] {
+export function getAllDayEventsForDayKey(
+  events: CalEvent[],
+  key: string,
+  timeZone?: string
+): CalEvent[] {
   return events.filter((e) => e.all_day && eventOccursOnKey(e, key, timeZone));
 }
 
-export function getAllDayEventsForDate(events: CalEvent[], date: Date, timeZone?: string): CalEvent[] {
+export function getAllDayEventsForDate(
+  events: CalEvent[],
+  date: Date,
+  timeZone?: string
+): CalEvent[] {
   return getAllDayEventsForDayKey(events, dayKey(date, timeZone), timeZone);
 }
 
@@ -247,7 +260,11 @@ export interface WeekSeg {
   lane: number;
 }
 
-export function startOfWeek(date: Date, weekStartsOn = DEFAULT_WEEK_STARTS_ON, timeZone?: string): Date {
+export function startOfWeek(
+  date: Date,
+  weekStartsOn = DEFAULT_WEEK_STARTS_ON,
+  timeZone?: string
+): Date {
   const d = toLocalMidnight(date, timeZone);
   let weekday: number;
   if (timeZone) {
@@ -268,7 +285,7 @@ export function startOfWeek(date: Date, weekStartsOn = DEFAULT_WEEK_STARTS_ON, t
 export function layoutMultiDayEventsForWeek(
   events: CalEvent[],
   weekStart: Date,
-  weekStartsOn = DEFAULT_WEEK_STARTS_ON,
+  weekStartsOn = DEFAULT_WEEK_STARTS_ON
 ): WeekSeg[] {
   // Use local-noon anchors everywhere so comparisons are time-of-day agnostic.
   const ws = parseDayKey(dayKey(startOfWeek(weekStart, weekStartsOn)));
@@ -338,7 +355,7 @@ export function layoutMultiDayEventsForWeek(
 export function eventDensityForDate(
   events: CalEvent[],
   date: Date,
-  timeZone?: string,
+  timeZone?: string
 ): { count: number; colors: string[] } {
   const k = dayKey(date, timeZone);
   const colors: string[] = [];
@@ -366,12 +383,8 @@ export function eventTimeLabel(ev: CalEvent, time24h: boolean, timeZone?: string
   }
   const start = parseLocalDate(ev.start, false, timeZone);
   if (!start) return "";
-  const h = timeZone
-    ? DateTime.fromJSDate(start, { zone: timeZone }).hour
-    : start.getHours();
-  const m = timeZone
-    ? DateTime.fromJSDate(start, { zone: timeZone }).minute
-    : start.getMinutes();
+  const h = timeZone ? DateTime.fromJSDate(start, { zone: timeZone }).hour : start.getHours();
+  const m = timeZone ? DateTime.fromJSDate(start, { zone: timeZone }).minute : start.getMinutes();
   if (time24h) return `${pad2(h)}:${pad2(m)}`;
   const period = h >= 12 ? "PM" : "AM";
   const h12 = h % 12 || 12;

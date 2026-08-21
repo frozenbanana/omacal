@@ -64,12 +64,7 @@ describe("eventShowDays", () => {
   it("all-day event spanning several days is inclusive of end-1", () => {
     const e = ev({ start: "2026-08-05", end: "2026-08-09", all_day: true });
     expect(eventShowDays(e)).toEqual({ startKey: "2026-08-05", endKey: "2026-08-08" });
-    expect(occupiedDayKeys(e)).toEqual([
-      "2026-08-05",
-      "2026-08-06",
-      "2026-08-07",
-      "2026-08-08",
-    ]);
+    expect(occupiedDayKeys(e)).toEqual(["2026-08-05", "2026-08-06", "2026-08-07", "2026-08-08"]);
   });
 
   it("single-day all-day uses exclusive end", () => {
@@ -112,11 +107,7 @@ describe("eventShowDays", () => {
   it("all-day across DST fall-back boundary keeps exact day count", () => {
     const e = ev({ start: "2026-10-24", end: "2026-10-27", all_day: true });
     // inclusive 24, 25, 26 — 25 Oct 2026 is the fall-back day
-    expect(occupiedDayKeys(e)).toEqual([
-      "2026-10-24",
-      "2026-10-25",
-      "2026-10-26",
-    ]);
+    expect(occupiedDayKeys(e)).toEqual(["2026-10-24", "2026-10-25", "2026-10-26"]);
   });
 });
 
@@ -197,7 +188,7 @@ describe("grouping / per-day queries", () => {
 describe("overflow & density", () => {
   it("computes +N overflow", () => {
     const many = Array.from({ length: 6 }, (_, i) =>
-      ev({ id: i, start: "2026-08-05", all_day: true }),
+      ev({ id: i, start: "2026-08-05", all_day: true })
     );
     expect(getOverflowCount(many, 3)).toBe(3);
     expect(getOverflowCount(many, 9)).toBe(0);
@@ -211,8 +202,16 @@ describe("overflow & density", () => {
   });
 
   it("year density only reflects currently filtered calendars", () => {
-    const a = ev({ calendar_id: 1, start: "2026-08-05T05:00:00.000Z", end: "2026-08-05T06:00:00.000Z" });
-    const b = ev({ calendar_id: 2, start: "2026-08-05T07:00:00.000Z", end: "2026-08-05T08:00:00.000Z" });
+    const a = ev({
+      calendar_id: 1,
+      start: "2026-08-05T05:00:00.000Z",
+      end: "2026-08-05T06:00:00.000Z",
+    });
+    const b = ev({
+      calendar_id: 2,
+      start: "2026-08-05T07:00:00.000Z",
+      end: "2026-08-05T08:00:00.000Z",
+    });
     const d = new Date(2026, 7, 5, 12, 0, 0);
     expect(getEventCountForDate([a, b], d)).toBe(2);
     expect(getEventCountForDate([a], d)).toBe(1);
@@ -222,7 +221,7 @@ describe("overflow & density", () => {
 
   it("caps density colors at three, preserving calendar colors", () => {
     const events = Array.from({ length: 5 }, (_, i) =>
-      ev({ id: i, start: "2026-08-05", all_day: true }),
+      ev({ id: i, start: "2026-08-05", all_day: true })
     );
     const density = eventDensityForDate(events, new Date(2026, 7, 5, 12));
     expect(density.count).toBe(5);

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Waybar custom module: next Omarcal event
+# Waybar custom module: next Omacal event
 set -euo pipefail
 
-DB="${XDG_DATA_HOME:-$HOME/.local/share}/omarcal/omarcal.db"
+DB="${XDG_DATA_HOME:-$HOME/.local/share}/omacal/omacal.db"
 if [[ ! -f "$DB" ]]; then
-  printf '{"text":"󰃭","tooltip":"Omarcal — no data yet","class":"omarcal"}\n'
+  printf '{"text":"󰃭","tooltip":"Omacal — no data yet","class":"omacal"}\n'
   exit 0
 fi
 
@@ -26,7 +26,7 @@ row = conn.execute(
     (datetime.now(timezone.utc).isoformat(),),
 ).fetchone()
 if not row:
-    print(json.dumps({"text": "󰃭", "tooltip": "No upcoming events", "class": "omarcal"}))
+    print(json.dumps({"text": "󰃭", "tooltip": "No upcoming events", "class": "omacal"}))
 else:
     title, start, loc = row
     try:
@@ -36,5 +36,5 @@ else:
         when = start
     tip = f"{when}  {title}" + (f" @ {loc}" if loc else "")
     short = title if len(title) <= 24 else title[:23] + "…"
-    print(json.dumps({"text": f"󰃭 {when} {short}", "tooltip": tip, "class": "omarcal"}))
+    print(json.dumps({"text": f"󰃭 {when} {short}", "tooltip": tip, "class": "omacal"}))
 PY

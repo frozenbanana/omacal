@@ -1,11 +1,11 @@
 :root {
   color-scheme: dark;
-  --bg: #0b0c16;
-  --fg: #ddf7ff;
-  --accent: #82fb9c;
-  --cursor: #ddf7ff;
-  --sel-fg: #0b0c16;
-  --sel-bg: #ddf7ff;
+  --bg: #2e3440;
+  --fg: #d8dee9;
+  --accent: #81a1c1;
+  --cursor: #d8dee9;
+  --sel-fg: #2e3440;
+  --sel-bg: #d8dee9;
   --muted: color-mix(in srgb, var(--fg) 55%, transparent);
   --panel: color-mix(in srgb, var(--fg) 6%, var(--bg));
   --border: color-mix(in srgb, var(--fg) 14%, transparent);
@@ -33,11 +33,35 @@ input,
 select,
 textarea {
   font: inherit;
-  color: inherit;
-  background: color-mix(in srgb, var(--fg) 8%, var(--bg));
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 10%, var(--bg));
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.45rem 0.65rem;
+}
+
+input,
+select,
+textarea {
+  caret-color: var(--accent);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--fg) 45%, var(--bg));
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+option {
+  background: var(--bg);
+  color: var(--fg);
 }
 
 button {
@@ -334,6 +358,12 @@ button:disabled {
   filter: saturate(1.08);
 }
 
+.fc .fc-day.om-paste-anchor,
+.fc .fc-timegrid-col.om-paste-anchor {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg)) !important;
+}
+
 .fc-event.fc-invite {
   background: transparent !important;
   border: 1px dashed var(--fc-event-border-color, var(--accent)) !important;
@@ -528,7 +558,7 @@ button:disabled {
 .form-grid label {
   display: grid;
   gap: 0.3rem;
-  color: var(--muted);
+  color: color-mix(in srgb, var(--fg) 72%, var(--muted));
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -656,7 +686,7 @@ button:disabled {
 }
 
 .muted {
-  color: var(--muted);
+  color: color-mix(in srgb, var(--fg) 62%, var(--bg));
 }
 
 .error {
@@ -1199,4 +1229,3 @@ button:disabled {
   border-top-right-radius: 2px;
   border-bottom-right-radius: 2px;
 }
-

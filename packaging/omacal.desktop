@@ -1,11 +1,18 @@
 [Desktop Entry]
-Name=Omarcal
+Name=Omacal
 Comment=Omarchy-native CalDAV calendar
-Exec=omarcal %U
-Icon=omarcal
+Exec=omacal %U
+TryExec=omacal
+Icon=omacal
 Terminal=false
 Type=Application
 Categories=Office;Calendar;
 Keywords=calendar;caldav;nextcloud;omarchy;
-StartupWMClass=omarcal
+StartupWMClass=omacal
 MimeType=text/calendar;
+Actions=NewEvent;
+
+[Desktop Action NewEvent]
+Name=New Event
+Exec=omacal --new-event
+Icon=omacal

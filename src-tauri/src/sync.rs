@@ -60,19 +60,24 @@ impl SyncEngine {
                 }
             }
         }
-        let _ = self.db.set_meta(
-            "last_sync",
-            &chrono::Utc::now().to_rfc3339(),
-        );
+        let _ = self
+            .db
+            .set_meta("last_sync", &chrono::Utc::now().to_rfc3339());
         if !report.errors.is_empty() {
-            let _ = self.db.set_meta("last_sync_error", &report.errors.join("; "));
+            let _ = self
+                .db
+                .set_meta("last_sync_error", &report.errors.join("; "));
         } else {
             let _ = self.db.set_meta("last_sync_error", "");
         }
         Ok(report)
     }
 
-    pub async fn sync_account(&self, account: &AccountConfig, cfg: &AppConfig) -> Result<SyncReport, String> {
+    pub async fn sync_account(
+        &self,
+        account: &AccountConfig,
+        cfg: &AppConfig,
+    ) -> Result<SyncReport, String> {
         let password = secrets::get_password(&account.id)?;
         let client = CalDavClient::new(&account.caldav_url, &account.username, &password)
             .map_err(|e| e.to_string())?;
@@ -96,10 +101,7 @@ impl SyncEngine {
         };
 
         for remote in remotes {
-            let color = remote
-                .color
-                .clone()
-                .unwrap_or_else(|| "#829dd4".into());
+            let color = remote.color.clone().unwrap_or_else(|| "#829dd4".into());
             let cal_id = self
                 .db
                 .upsert_calendar(
@@ -139,9 +141,7 @@ impl SyncEngine {
                     .parse::<chrono_tz::Tz>()
                     .ok()
                     .or_else(|| Some(ics::default_tz()));
-                if let Some(parsed) =
-                    ics::parse_ics_with_tz(raw, &account.addresses, default_tz)
-                {
+                if let Some(parsed) = ics::parse_ics_with_tz(raw, &account.addresses, default_tz) {
                     let attendees_json =
                         serde_json::to_string(&parsed.attendees).unwrap_or_else(|_| "[]".into());
                     let alarms_json =
@@ -173,11 +173,7 @@ impl SyncEngine {
 
             let ctag = remote.ctag.as_deref();
             self.db
-                .set_calendar_sync_state(
-                    cal_id,
-                    new_token.as_deref().or(token.as_deref()),
-                    ctag,
-                )
+                .set_calendar_sync_state(cal_id, new_token.as_deref().or(token.as_deref()), ctag)
                 .map_err(|e| e.to_string())?;
         }
 
@@ -231,8 +227,7 @@ impl SyncEngine {
         username: &str,
         password: &str,
     ) -> Result<Vec<String>, String> {
-        let client =
-            CalDavClient::new(url, username, password).map_err(|e| e.to_string())?;
+        let client = CalDavClient::new(url, username, password).map_err(|e| e.to_string())?;
         let principal = client
             .discover_principal()
             .await

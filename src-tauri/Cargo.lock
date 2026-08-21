@@ -2791,8 +2791,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "omarcal"
-version = "0.1.0"
+name = "omacal"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

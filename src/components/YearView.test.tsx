@@ -39,12 +39,32 @@ function cellBlock(markup: string, ariaLabel: string): string {
 
 describe("YearView", () => {
   const events: CalEvent[] = [
-    ev({ id: 1, start: "2026-08-05T05:00:00.000Z", end: "2026-08-05T06:00:00.000Z", title: "NOGI Morning" }),
-    ev({ id: 2, start: "2026-08-05T12:00:00.000Z", end: "2026-08-05T13:00:00.000Z", title: "Lotus Tech Sync" }),
-    ev({ id: 3, start: "2026-08-05T17:00:00.000Z", end: "2026-08-05T18:00:00.000Z", title: "NOGI Evening" }),
+    ev({
+      id: 1,
+      start: "2026-08-05T05:00:00.000Z",
+      end: "2026-08-05T06:00:00.000Z",
+      title: "NOGI Morning",
+    }),
+    ev({
+      id: 2,
+      start: "2026-08-05T12:00:00.000Z",
+      end: "2026-08-05T13:00:00.000Z",
+      title: "Lotus Tech Sync",
+    }),
+    ev({
+      id: 3,
+      start: "2026-08-05T17:00:00.000Z",
+      end: "2026-08-05T18:00:00.000Z",
+      title: "NOGI Evening",
+    }),
     // multi-day personal event: Planeringsvecka Mon Aug 10 -> Fri Aug 14
     ev({ id: 4, start: "2026-08-10", end: "2026-08-15", all_day: true, title: "Planeringsvecka" }),
-    ev({ id: 5, start: "2026-08-12T05:00:00.000Z", end: "2026-08-12T06:00:00.000Z", title: "Planning sync" }),
+    ev({
+      id: 5,
+      start: "2026-08-12T05:00:00.000Z",
+      end: "2026-08-12T06:00:00.000Z",
+      title: "Planning sync",
+    }),
   ];
 
   const markup = renderToStaticMarkup(
@@ -55,7 +75,7 @@ describe("YearView", () => {
       weekStartsOn={1}
       onSelectDay={() => {}}
       onSelectMonth={() => {}}
-    />,
+    />
   );
 
   it("renders the year title and all twelve months", () => {

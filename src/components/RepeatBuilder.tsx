@@ -3,10 +3,19 @@ import { DateTime } from "luxon";
 
 type Day = "MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU";
 const DAYS: Day[] = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
-const DAY_LABEL: Record<Day, string> = { MO: "Mon", TU: "Tue", WE: "Wed", TH: "Thu", FR: "Fri", SA: "Sat", SU: "Sun" };
+const DAY_LABEL: Record<Day, string> = {
+  MO: "Mon",
+  TU: "Tue",
+  WE: "Wed",
+  TH: "Thu",
+  FR: "Fri",
+  SA: "Sat",
+  SU: "Sun",
+};
 const DAY_ISO: Record<Day, number> = { MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6, SU: 7 };
 
-export type RepeatEnds = { mode: "never" } | { mode: "on"; until: string } | { mode: "after"; count: number };
+export type RepeatEnds =
+  { mode: "never" } | { mode: "on"; until: string } | { mode: "after"; count: number };
 
 export interface RepeatValue {
   freq: "DAILY" | "WEEKLY";
@@ -20,23 +29,41 @@ function weekdayFromDTStart(dtstart: string, timeZone?: string): Day {
   let dt: DateTime | null = null;
   if (dtstart.includes("T")) {
     dt = DateTime.fromISO(dtstart, { zone: timeZone || undefined });
-    if (!dt.isValid) dt = DateTime.fromFormat(dtstart.slice(0, 16), "yyyy-MM-dd'T'HH:mm", { zone: timeZone });
+    if (!dt.isValid)
+      dt = DateTime.fromFormat(dtstart.slice(0, 16), "yyyy-MM-dd'T'HH:mm", { zone: timeZone });
     if (!dt.isValid) dt = DateTime.fromISO(dtstart, { setZone: true });
   }
   if (!dt || !dt.isValid) dt = DateTime.now().setZone(timeZone || "Europe/Stockholm");
   const wd = dt.weekday; // 1 Mon ..7 Sun
-  const map: Record<number, Day> = { 1: "MO", 2: "TU", 3: "WE", 4: "TH", 5: "FR", 6: "SA", 7: "SU" };
+  const map: Record<number, Day> = {
+    1: "MO",
+    2: "TU",
+    3: "WE",
+    4: "TH",
+    5: "FR",
+    6: "SA",
+    7: "SU",
+  };
   return map[wd] || "MO";
 }
 
-export function parseRRule(rrule: string | null | undefined, dtstart: string, timeZone?: string): RepeatValue | null {
+export function parseRRule(
+  rrule: string | null | undefined,
+  dtstart: string,
+  timeZone?: string
+): RepeatValue | null {
   if (!rrule || !rrule.trim()) return null;
   const raw = rrule.trim();
   const clean = raw.toUpperCase().startsWith("RRULE:") ? raw.slice(6) : raw;
-  const parts = Object.fromEntries(clean.split(";").map(p => {
-    const [k, v] = p.split("=");
-    return [k?.toUpperCase(), v];
-  }).filter(([k]) => !!k));
+  const parts = Object.fromEntries(
+    clean
+      .split(";")
+      .map((p) => {
+        const [k, v] = p.split("=");
+        return [k?.toUpperCase(), v];
+      })
+      .filter(([k]) => !!k)
+  );
   const freq = (parts.FREQ as RepeatValue["freq"]) || "WEEKLY";
   if (freq !== "DAILY" && freq !== "WEEKLY") {
     // For unsupported freqs (MONTHLY/YEARLY), fallback to raw preserved? For v1 we treat as weekly custom preserved
@@ -48,7 +75,9 @@ export function parseRRule(rrule: string | null | undefined, dtstart: string, ti
   let byday: Day[] = [];
   if (freq === "WEEKLY") {
     if (parts.BYDAY) {
-      byday = parts.BYDAY.split(",").map((s: string) => s.trim().toUpperCase() as Day).filter((d: Day) => (DAYS as unknown as string[]).includes(d));
+      byday = parts.BYDAY.split(",")
+        .map((s: string) => s.trim().toUpperCase() as Day)
+        .filter((d: Day) => (DAYS as unknown as string[]).includes(d));
     }
     if (byday.length === 0) byday = [weekdayFromDTStart(dtstart, timeZone)];
   }
@@ -58,7 +87,7 @@ export function parseRRule(rrule: string | null | undefined, dtstart: string, ti
     if (c > 0 && c <= 999) ends = { mode: "after", count: c };
   } else if (parts.UNTIL) {
     // UNTIL may be YYYYMMDD or YYYYMMDDTHHMMSSZ
-    let untilIso = parts.UNTIL;
+    const untilIso = parts.UNTIL;
     let dt: DateTime | null = null;
     if (/^\d{8}T\d{6}Z$/.test(untilIso)) {
       dt = DateTime.fromFormat(untilIso, "yyyyMMdd'T'HHmmss'Z'", { zone: "utc" });
@@ -77,13 +106,18 @@ export function parseRRule(rrule: string | null | undefined, dtstart: string, ti
   return { freq, interval, byday, ends };
 }
 
-export function buildRRule(v: RepeatValue | null, _dtstart?: string, timeZone?: string, allDay?: boolean): string | null {
+export function buildRRule(
+  v: RepeatValue | null,
+  _dtstart?: string,
+  timeZone?: string,
+  allDay?: boolean
+): string | null {
   if (!v) return null;
   const parts: string[] = [`FREQ=${v.freq}`];
   if (v.interval > 1) parts.push(`INTERVAL=${v.interval}`);
   if (v.freq === "WEEKLY" && v.byday.length > 0) {
     // Sort by ISO weekday order for stability
-    const sorted = [...v.byday].sort((a,b) => DAY_ISO[a]-DAY_ISO[b]);
+    const sorted = [...v.byday].sort((a, b) => DAY_ISO[a] - DAY_ISO[b]);
     parts.push(`BYDAY=${sorted.join(",")}`);
   }
   if (v.ends.mode === "after") {
@@ -117,7 +151,7 @@ export function buildRRule(v: RepeatValue | null, _dtstart?: string, timeZone?: 
   return parts.join(";");
 }
 
-export function humanize(v: RepeatValue | null, _timeZone?: string): string {
+export function humanize(v: RepeatValue | null): string {
   if (!v) return "Does not repeat";
   const every = v.interval === 1 ? "Every" : `Every ${v.interval}`;
   if (v.freq === "DAILY") {
@@ -127,9 +161,17 @@ export function humanize(v: RepeatValue | null, _timeZone?: string): string {
     return base;
   }
   // WEEKLY
-  const days = v.byday.length === 5 && v.byday.includes("MO" as Day) && v.byday.includes("TU" as Day) && v.byday.includes("WE" as Day) && v.byday.includes("TH" as Day) && v.byday.includes("FR" as Day) && !v.byday.includes("SA") && !v.byday.includes("SU")
-    ? "weekday"
-    : v.byday.map(d => DAY_LABEL[d]).join(", ");
+  const days =
+    v.byday.length === 5 &&
+    v.byday.includes("MO" as Day) &&
+    v.byday.includes("TU" as Day) &&
+    v.byday.includes("WE" as Day) &&
+    v.byday.includes("TH" as Day) &&
+    v.byday.includes("FR" as Day) &&
+    !v.byday.includes("SA") &&
+    !v.byday.includes("SU")
+      ? "weekday"
+      : v.byday.map((d) => DAY_LABEL[d]).join(", ");
   const base = v.interval === 1 ? `Weekly on ${days}` : `${every} weeks on ${days}`;
   if (v.ends.mode === "after") return `${base}, ${v.ends.count} times`;
   if (v.ends.mode === "on") return `${base} until ${v.ends.until}`;
@@ -144,12 +186,15 @@ export function RepeatBuilder(props: {
   onChange: (rrule: string | null) => void;
 }) {
   const { rrule, dtstart, allDay, timezone, onChange } = props;
-  const initialParsed = useMemo(() => parseRRule(rrule || null, dtstart || "", timezone), [rrule, dtstart, timezone]);
+  const initialParsed = useMemo(
+    () => parseRRule(rrule || null, dtstart || "", timezone),
+    [rrule, dtstart, timezone]
+  );
   // Track whether RRULE was unsupported (parse returned null but rrule non-empty)
   const isUnsupported = !!rrule && !initialParsed;
   const [enabled, setEnabled] = useState<boolean>(() => !!rrule);
   const [value, setValue] = useState<RepeatValue | null>(() => initialParsed);
-  const [rawFallback, setRawFallback] = useState<string>(() => isUnsupported ? (rrule || "") : "");
+  const [rawFallback, setRawFallback] = useState<string>(() => (isUnsupported ? rrule || "" : ""));
 
   useEffect(() => {
     const p = parseRRule(rrule || null, dtstart || "", timezone);
@@ -176,7 +221,12 @@ export function RepeatBuilder(props: {
       setValue(null);
     } else {
       const defDay = weekdayFromDTStart(dtstart, timezone);
-      const def: RepeatValue = { freq: "WEEKLY", interval: 1, byday: [defDay], ends: { mode: "never" } };
+      const def: RepeatValue = {
+        freq: "WEEKLY",
+        interval: 1,
+        byday: [defDay],
+        ends: { mode: "never" },
+      };
       push(def);
     }
   };
@@ -186,12 +236,26 @@ export function RepeatBuilder(props: {
     return (
       <div style={{ display: "grid", gap: "0.4rem" }}>
         <label className="cal-row" style={{ textTransform: "none" }}>
-          <input type="checkbox" checked={enabled} onChange={e => toggleEnabled(e.target.checked)} /> Repeat
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => toggleEnabled(e.target.checked)}
+          />{" "}
+          Repeat
         </label>
         {enabled && (
           <>
-            <div className="muted" style={{ fontSize: "0.72rem" }}>Custom RRULE (unsupported frequency — edit raw)</div>
-            <input value={rawFallback} onChange={e => { setRawFallback(e.target.value); onChange(e.target.value.trim() || null); }} placeholder="FREQ=WEEKLY;BYDAY=MO,WE" />
+            <div className="muted" style={{ fontSize: "0.72rem" }}>
+              Custom RRULE (unsupported frequency — edit raw)
+            </div>
+            <input
+              value={rawFallback}
+              onChange={(e) => {
+                setRawFallback(e.target.value);
+                onChange(e.target.value.trim() || null);
+              }}
+              placeholder="FREQ=WEEKLY;BYDAY=MO,WE"
+            />
           </>
         )}
       </div>
@@ -201,14 +265,22 @@ export function RepeatBuilder(props: {
   return (
     <div style={{ display: "grid", gap: "0.5rem" }}>
       <label className="cal-row" style={{ textTransform: "none" }}>
-        <input type="checkbox" checked={enabled} onChange={e => toggleEnabled(e.target.checked)} /> Repeat
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => toggleEnabled(e.target.checked)}
+        />{" "}
+        Repeat
       </label>
       {enabled && value && (
         <>
           <div className="form-row" style={{ gridTemplateColumns: "1fr 1fr" }}>
             <label>
               Frequency
-              <select value={value.freq} onChange={e => push({ ...value, freq: e.target.value as RepeatValue["freq"] })}>
+              <select
+                value={value.freq}
+                onChange={(e) => push({ ...value, freq: e.target.value as RepeatValue["freq"] })}
+              >
                 <option value="DAILY">Daily</option>
                 <option value="WEEKLY">Weekly</option>
               </select>
@@ -216,23 +288,41 @@ export function RepeatBuilder(props: {
             <label>
               Every
               <span style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
-                <input type="number" min={1} max={99} value={value.interval} onChange={e => push({ ...value, interval: Math.max(1, Math.min(99, parseInt(e.target.value || "1", 10) )) })} style={{ width: "4.5rem" }} />
-                <span style={{ fontSize: "0.72rem", color: "var(--muted)" }}>{value.freq === "DAILY" ? "day(s)" : "week(s)"}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={99}
+                  value={value.interval}
+                  onChange={(e) =>
+                    push({
+                      ...value,
+                      interval: Math.max(1, Math.min(99, parseInt(e.target.value || "1", 10))),
+                    })
+                  }
+                  style={{ width: "4.5rem" }}
+                />
+                <span style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
+                  {value.freq === "DAILY" ? "day(s)" : "week(s)"}
+                </span>
               </span>
             </label>
           </div>
           {value.freq === "WEEKLY" && (
             <div>
-              <div className="muted" style={{ fontSize: "0.72rem", marginBottom: "0.2rem" }}>On</div>
+              <div className="muted" style={{ fontSize: "0.72rem", marginBottom: "0.2rem" }}>
+                On
+              </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
-                {DAYS.map(d => {
+                {DAYS.map((d) => {
                   const active = value.byday.includes(d);
                   return (
                     <button
                       key={d}
                       type="button"
                       onClick={() => {
-                        const next = active ? value.byday.filter(x => x !== d) : [...value.byday, d];
+                        const next = active
+                          ? value.byday.filter((x) => x !== d)
+                          : [...value.byday, d];
                         // Keep at least one
                         if (next.length === 0) return;
                         push({ ...value, byday: next });
@@ -253,8 +343,14 @@ export function RepeatBuilder(props: {
                 })}
                 <button
                   type="button"
-                  onClick={() => push({ ...value, byday: ["MO","TU","WE","TH","FR"] })}
-                  style={{ padding: "0.2rem 0.45rem", fontSize: "0.68rem", border: "1px dashed var(--border)", background: "transparent", borderRadius: "999px" }}
+                  onClick={() => push({ ...value, byday: ["MO", "TU", "WE", "TH", "FR"] })}
+                  style={{
+                    padding: "0.2rem 0.45rem",
+                    fontSize: "0.68rem",
+                    border: "1px dashed var(--border)",
+                    background: "transparent",
+                    borderRadius: "999px",
+                  }}
                 >
                   Weekdays
                 </button>
@@ -263,12 +359,22 @@ export function RepeatBuilder(props: {
           )}
           <label>
             Ends
-            <select value={value.ends.mode} onChange={e => {
-              const m = e.target.value as RepeatEnds["mode"];
-              if (m === "never") push({ ...value, ends: { mode: "never" } });
-              else if (m === "after") push({ ...value, ends: { mode: "after", count: 10 } });
-              else push({ ...value, ends: { mode: "on", until: DateTime.now().plus({ months: 3 }).toFormat("yyyy-MM-dd") } });
-            }}>
+            <select
+              value={value.ends.mode}
+              onChange={(e) => {
+                const m = e.target.value as RepeatEnds["mode"];
+                if (m === "never") push({ ...value, ends: { mode: "never" } });
+                else if (m === "after") push({ ...value, ends: { mode: "after", count: 10 } });
+                else
+                  push({
+                    ...value,
+                    ends: {
+                      mode: "on",
+                      until: DateTime.now().plus({ months: 3 }).toFormat("yyyy-MM-dd"),
+                    },
+                  });
+              }}
+            >
               <option value="never">Never</option>
               <option value="on">On date</option>
               <option value="after">After</option>
@@ -277,19 +383,40 @@ export function RepeatBuilder(props: {
           {value.ends.mode === "on" && (
             <label>
               Until
-              <input type="date" value={value.ends.until} onChange={e => push({ ...value, ends: { mode: "on", until: e.target.value } })} />
+              <input
+                type="date"
+                value={value.ends.until}
+                onChange={(e) => push({ ...value, ends: { mode: "on", until: e.target.value } })}
+              />
             </label>
           )}
           {value.ends.mode === "after" && (
             <label>
               Count
               <span style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
-                <input type="number" min={1} max={999} value={value.ends.count} onChange={e => push({ ...value, ends: { mode: "after", count: Math.max(1, Math.min(999, parseInt(e.target.value || "1", 10))) } })} style={{ width: "4.5rem" }} />
+                <input
+                  type="number"
+                  min={1}
+                  max={999}
+                  value={value.ends.count}
+                  onChange={(e) =>
+                    push({
+                      ...value,
+                      ends: {
+                        mode: "after",
+                        count: Math.max(1, Math.min(999, parseInt(e.target.value || "1", 10))),
+                      },
+                    })
+                  }
+                  style={{ width: "4.5rem" }}
+                />
                 <span style={{ fontSize: "0.72rem", color: "var(--muted)" }}>times</span>
               </span>
             </label>
           )}
-          <div className="muted" style={{ fontSize: "0.72rem", fontStyle: "italic" }}>{humanize(value, timezone)}</div>
+          <div className="muted" style={{ fontSize: "0.72rem", fontStyle: "italic" }}>
+            {humanize(value)}
+          </div>
         </>
       )}
     </div>

@@ -22,14 +22,7 @@ type Props = {
 const GAP = 6;
 const MARGIN = 8;
 
-export function DayPopover({
-  date,
-  events,
-  time24h,
-  anchor,
-  onClose,
-  onSelectEvent,
-}: Props) {
+export function DayPopover({ date, events, time24h, anchor, onClose, onSelectEvent }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
@@ -62,7 +55,14 @@ export function DayPopover({
 
   return (
     <>
-      <div className="day-popover-backdrop" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
+      <div
+        className="day-popover-backdrop"
+        onClick={onClose}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onClose();
+        }}
+      />
       <div
         ref={ref}
         role="dialog"
@@ -71,7 +71,9 @@ export function DayPopover({
         style={pos ? { left: pos.left, top: pos.top } : { visibility: "hidden" }}
       >
         <div className="day-popover-header">
-          <span className="day-popover-title">{date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</span>
+          <span className="day-popover-title">
+            {date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+          </span>
           <button type="button" className="day-popover-close" aria-label="Close" onClick={onClose}>
             ✕
           </button>
@@ -90,7 +92,10 @@ export function DayPopover({
                 title={label}
                 onClick={() => onSelectEvent(ev)}
               >
-                <span className="day-popover-dot" style={{ background: ev.color, borderColor: ev.color }} />
+                <span
+                  className="day-popover-dot"
+                  style={{ background: ev.color, borderColor: ev.color }}
+                />
                 {!ev.all_day && <span className="day-popover-time">{time}</span>}
                 <span className="day-popover-title-text">{ev.title || "(no title)"}</span>
               </button>

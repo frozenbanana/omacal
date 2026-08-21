@@ -1,7 +1,9 @@
 use crate::db::{AlarmInfo, AttendeeInfo};
 use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 use chrono_tz::Tz;
-use icalendar::{Calendar, CalendarComponent, Component, DatePerhapsTime, Event, EventLike, EventStatus};
+use icalendar::{
+    Calendar, CalendarComponent, Component, DatePerhapsTime, Event, EventLike, EventStatus,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -230,7 +232,10 @@ fn extract_dt_from_raw_with_tz(
 
 /// Extract wall (Naive) + TZID for a DTSTART/DTEND line from raw ICS.
 /// Returns (wall_naive, tz_option, is_all_day)
-pub fn extract_wall_dt_and_tz(raw: &str, prop: &str) -> Option<(chrono::NaiveDateTime, Option<Tz>, bool)> {
+pub fn extract_wall_dt_and_tz(
+    raw: &str,
+    prop: &str,
+) -> Option<(chrono::NaiveDateTime, Option<Tz>, bool)> {
     for line in unfold(raw) {
         let upper = line.to_uppercase();
         if !upper.starts_with(prop) {
@@ -458,16 +463,16 @@ fn split_prop(line: &str) -> (std::collections::HashMap<String, String>, String)
     let _name = parts.next();
     for p in parts {
         if let Some((k, v)) = p.split_once('=') {
-            params.insert(
-                k.to_uppercase(),
-                v.trim_matches('"').to_string(),
-            );
+            params.insert(k.to_uppercase(), v.trim_matches('"').to_string());
         }
     }
     (params, value)
 }
 
-pub fn build_ics(input: &EventInput, existing_uid: Option<&str>) -> Result<(String, String), String> {
+pub fn build_ics(
+    input: &EventInput,
+    existing_uid: Option<&str>,
+) -> Result<(String, String), String> {
     let uid = existing_uid
         .map(|s| s.to_string())
         .or_else(|| input.uid.clone())
@@ -501,9 +506,10 @@ pub fn build_ics(input: &EventInput, existing_uid: Option<&str>) -> Result<(Stri
 
 fn inject_times(ics: &str, input: &EventInput) -> Result<String, String> {
     let (start_line, end_line) = if input.all_day {
-        let s = NaiveDate::parse_from_str(&input.dtstart[..10.min(input.dtstart.len())], "%Y-%m-%d")
-            .or_else(|_| NaiveDate::parse_from_str(&input.dtstart, "%Y-%m-%d"))
-            .map_err(|e| e.to_string())?;
+        let s =
+            NaiveDate::parse_from_str(&input.dtstart[..10.min(input.dtstart.len())], "%Y-%m-%d")
+                .or_else(|_| NaiveDate::parse_from_str(&input.dtstart, "%Y-%m-%d"))
+                .map_err(|e| e.to_string())?;
         let e = NaiveDate::parse_from_str(&input.dtend[..10.min(input.dtend.len())], "%Y-%m-%d")
             .or_else(|_| NaiveDate::parse_from_str(&input.dtend, "%Y-%m-%d"))
             .map_err(|e| e.to_string())?;
@@ -726,7 +732,11 @@ pub fn expand_rrule_wall_tz(
     let Ok(set) = rule_str.parse::<RRuleSet>() else {
         // fallback: convert single wall to UTC
         if let Some(tz) = tz {
-            if let Some(ldt) = tz.from_local_datetime(&wall_start).single().or_else(|| tz.from_local_datetime(&wall_start).earliest()) {
+            if let Some(ldt) = tz
+                .from_local_datetime(&wall_start)
+                .single()
+                .or_else(|| tz.from_local_datetime(&wall_start).earliest())
+            {
                 return vec![ldt.with_timezone(&Utc)];
             }
         }
@@ -801,19 +811,31 @@ pub fn parse_exdates(raw: &str, default_tz: Option<Tz>) -> Vec<DateTime<Utc>> {
         };
         for token in val_part.split(',') {
             let tok = token.trim();
-            if tok.is_empty() { continue; }
+            if tok.is_empty() {
+                continue;
+            }
             let dt_opt = if tok.ends_with('Z') {
-                DateTime::parse_from_str(tok, "%Y%m%dT%H%M%SZ").ok().map(|d| d.with_timezone(&Utc))
+                DateTime::parse_from_str(tok, "%Y%m%dT%H%M%SZ")
+                    .ok()
+                    .map(|d| d.with_timezone(&Utc))
             } else if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(tok, "%Y%m%dT%H%M%S") {
                 if let Some(tz) = tz_opt {
-                    if let Some(ldt) = tz.from_local_datetime(&ndt).single().or_else(|| tz.from_local_datetime(&ndt).earliest()) {
+                    if let Some(ldt) = tz
+                        .from_local_datetime(&ndt)
+                        .single()
+                        .or_else(|| tz.from_local_datetime(&ndt).earliest())
+                    {
                         Some(ldt.with_timezone(&Utc))
                     } else {
                         Some(DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
                     }
                 } else if let Some(tz) = default_tz {
                     // Floating EXDATE -> interpret as default timezone
-                    if let Some(ldt) = tz.from_local_datetime(&ndt).single().or_else(|| tz.from_local_datetime(&ndt).earliest()) {
+                    if let Some(ldt) = tz
+                        .from_local_datetime(&ndt)
+                        .single()
+                        .or_else(|| tz.from_local_datetime(&ndt).earliest())
+                    {
                         Some(ldt.with_timezone(&Utc))
                     } else {
                         Some(DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
@@ -823,9 +845,13 @@ pub fn parse_exdates(raw: &str, default_tz: Option<Tz>) -> Vec<DateTime<Utc>> {
                 }
             } else if let Ok(d) = NaiveDate::parse_from_str(tok, "%Y%m%d") {
                 // All-day EXDATE — treat as midnight in tz if given
-                let ndt = d.and_hms_opt(0,0,0).unwrap();
+                let ndt = d.and_hms_opt(0, 0, 0).unwrap();
                 if let Some(tz) = tz_opt.or(default_tz) {
-                    if let Some(ldt) = tz.from_local_datetime(&ndt).single().or_else(|| tz.from_local_datetime(&ndt).earliest()) {
+                    if let Some(ldt) = tz
+                        .from_local_datetime(&ndt)
+                        .single()
+                        .or_else(|| tz.from_local_datetime(&ndt).earliest())
+                    {
                         Some(ldt.with_timezone(&Utc))
                     } else {
                         Some(DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
@@ -850,7 +876,10 @@ pub fn inject_exdate(raw: &str, occurrence_utc: DateTime<Utc>, dtstart_tz: Optio
     // Dedupe: if already excluded, return unchanged
     let default_tz = dtstart_tz.or(Some(default_tz()));
     let existing = parse_exdates(raw, default_tz);
-    if existing.iter().any(|d| d.timestamp() == occurrence_utc.timestamp()) {
+    if existing
+        .iter()
+        .any(|d| d.timestamp() == occurrence_utc.timestamp())
+    {
         return raw.to_string();
     }
     // Determine EXDATE string form to match DTSTART
@@ -862,7 +891,8 @@ pub fn inject_exdate(raw: &str, occurrence_utc: DateTime<Utc>, dtstart_tz: Optio
         let mut has_tzid = false;
         for line in unfold(raw) {
             if line.to_uppercase().starts_with("EXDATE") && line.to_uppercase().contains("TZID=") {
-                has_tzid = true; break;
+                has_tzid = true;
+                break;
             }
         }
         if has_tzid {
@@ -886,7 +916,11 @@ pub fn inject_exdate(raw: &str, occurrence_utc: DateTime<Utc>, dtstart_tz: Optio
         }
     }
     if let Some(idx) = found_idx {
-        let merged = format!("{},{}", lines[idx].trim_end(), exdate_val.split(':').nth(1).unwrap_or(""));
+        let merged = format!(
+            "{},{}",
+            lines[idx].trim_end(),
+            exdate_val.split(':').nth(1).unwrap_or("")
+        );
         // If existing line had TZID param, we should keep it — already handled by using same TZID form above
         // Simplify: if we generated TZID form, replace whole line with combined values
         if lines[idx].to_uppercase().contains("TZID=") && exdate_val.contains("TZID=") {
@@ -910,7 +944,12 @@ pub fn inject_exdate(raw: &str, occurrence_utc: DateTime<Utc>, dtstart_tz: Optio
 }
 
 /// Truncate RRULE with UNTIL (keeps wall semantics). Returns new raw ICS.
-pub fn truncate_rrule_until(raw: &str, until_wall: chrono::NaiveDateTime, until_tz: Option<Tz>, is_all_day: bool) -> String {
+pub fn truncate_rrule_until(
+    raw: &str,
+    until_wall: chrono::NaiveDateTime,
+    until_tz: Option<Tz>,
+    is_all_day: bool,
+) -> String {
     let mut lines = unfold(raw);
     let mut new_lines = Vec::new();
     let until_str = if is_all_day {
@@ -920,7 +959,11 @@ pub fn truncate_rrule_until(raw: &str, until_wall: chrono::NaiveDateTime, until_
         // For our wall TZID DTSTART we emit wall UNTIL without Z (but many servers expect UTC). Emit UTC Z for safety.
         // However to keep wall, we emit UTC Z equivalent.
         let utc = {
-            if let Some(ldt) = tz.from_local_datetime(&until_wall).single().or_else(|| tz.from_local_datetime(&until_wall).earliest()) {
+            if let Some(ldt) = tz
+                .from_local_datetime(&until_wall)
+                .single()
+                .or_else(|| tz.from_local_datetime(&until_wall).earliest())
+            {
                 ldt.with_timezone(&Utc)
             } else {
                 DateTime::<Utc>::from_naive_utc_and_offset(until_wall, Utc)
@@ -928,7 +971,9 @@ pub fn truncate_rrule_until(raw: &str, until_wall: chrono::NaiveDateTime, until_
         };
         format!("UNTIL={}", utc.format("%Y%m%dT%H%M%SZ"))
     } else {
-        DateTime::<Utc>::from_naive_utc_and_offset(until_wall, Utc).format("%Y%m%dT%H%M%SZ").to_string()
+        DateTime::<Utc>::from_naive_utc_and_offset(until_wall, Utc)
+            .format("%Y%m%dT%H%M%SZ")
+            .to_string()
     };
     let until_str = format!("UNTIL={}", until_str.split('=').nth(1).unwrap_or(""));
     for line in lines.drain(..) {
@@ -938,7 +983,9 @@ pub fn truncate_rrule_until(raw: &str, until_wall: chrono::NaiveDateTime, until_
             let rrule_val = line.split(':').nth(1).unwrap_or("").to_string();
             // Split into k=v pairs
             let mut parts: Vec<String> = rrule_val.split(';').map(|s| s.to_string()).collect();
-            parts.retain(|p| !p.to_uppercase().starts_with("COUNT=") && !p.to_uppercase().starts_with("UNTIL="));
+            parts.retain(|p| {
+                !p.to_uppercase().starts_with("COUNT=") && !p.to_uppercase().starts_with("UNTIL=")
+            });
             parts.push(until_str.clone());
             let new_rrule = format!("RRULE:{}", parts.join(";"));
             new_lines.push(new_rrule);
@@ -960,7 +1007,9 @@ pub fn expand_rrule_from_raw(
     let mut occ = if let Some((wall, tz, _)) = extract_wall_dt_and_tz(raw, "DTSTART") {
         // Only use wall path if raw contains TZID or is floating wall time
         // (i.e., we could reconstruct wall). For pure UTC (Z), keep UTC path.
-        let is_utc = raw.lines().any(|l| l.to_uppercase().contains("DTSTART") && l.contains("Z"));
+        let is_utc = raw
+            .lines()
+            .any(|l| l.to_uppercase().contains("DTSTART") && l.contains("Z"));
         if tz.is_some() || !is_utc {
             expand_rrule_wall_tz(wall, tz, rrule, range_start, range_end)
         } else {
@@ -970,19 +1019,19 @@ pub fn expand_rrule_from_raw(
         expand_rrule_occurrences(dtstart_rfc, rrule, range_start, range_end)
     };
     // Filter EXDATEs
-    let default_tz = extract_wall_dt_and_tz(raw, "DTSTART").and_then(|(_, tz, _)| tz).or(Some(default_tz()));
+    let default_tz = extract_wall_dt_and_tz(raw, "DTSTART")
+        .and_then(|(_, tz, _)| tz)
+        .or(Some(default_tz()));
     let exdates = parse_exdates(raw, default_tz);
     if !exdates.is_empty() {
-        let ex_set: std::collections::HashSet<i64> = exdates.iter().map(|d| d.timestamp()).collect();
+        let ex_set: std::collections::HashSet<i64> =
+            exdates.iter().map(|d| d.timestamp()).collect();
         occ.retain(|d| !ex_set.contains(&d.timestamp()));
     }
     occ
 }
 
-pub fn alarm_trigger_at(
-    event_start: DateTime<Utc>,
-    trigger: &str,
-) -> Option<DateTime<Utc>> {
+pub fn alarm_trigger_at(event_start: DateTime<Utc>, trigger: &str) -> Option<DateTime<Utc>> {
     // Support -PT15M style relative triggers
     let t = trigger.trim();
     if let Some(rest) = t.strip_prefix('-') {
@@ -1044,9 +1093,9 @@ pub fn default_href_for_uid(calendar_href: &str, uid: &str) -> String {
     format!("{base}/{uid}.ics")
 }
 
-    #[test]
-    fn preview_import_parses_event_fields() {
-        const ICS: &str = "BEGIN:VCALENDAR\r\n\
+#[test]
+fn preview_import_parses_event_fields() {
+    const ICS: &str = "BEGIN:VCALENDAR\r\n\
 VERSION:2.0\r\n\
 BEGIN:VEVENT\r\n\
 UID:import-1\r\n\
@@ -1065,27 +1114,27 @@ ACTION:DISPLAY\r\n\
 END:VALARM\r\n\
 END:VEVENT\r\n\
 END:VCALENDAR\r\n";
-        let p = preview_from_ics(ICS).expect("preview");
-        assert_eq!(p.summary, "Standup");
-        assert_eq!(p.location, "Meeting room");
-        assert_eq!(p.description, "Daily sync");
-        // Floating 09:00 without TZ is interpreted as Europe/Stockholm.
-        // Sep 14 is CEST (UTC+2) => 07:00Z
-        assert_eq!(p.dtstart.as_deref(), Some("2026-09-14T07:00:00+00:00"));
-        assert!(!p.all_day);
-        assert_eq!(
-            p.rrule.as_deref(),
-            Some("FREQ=WEEKLY;BYDAY=MO,WE"),
-            "rrule={:?}",
-            p.rrule
-        );
-        assert_eq!(p.attendees.len(), 1);
-        assert_eq!(p.attendees[0].email, "alice@example.com");
-        assert_eq!(p.alarms.len(), 1);
-        assert_eq!(p.alarms[0].trigger, "-PT10M");
-    }
+    let p = preview_from_ics(ICS).expect("preview");
+    assert_eq!(p.summary, "Standup");
+    assert_eq!(p.location, "Meeting room");
+    assert_eq!(p.description, "Daily sync");
+    // Floating 09:00 without TZ is interpreted as Europe/Stockholm.
+    // Sep 14 is CEST (UTC+2) => 07:00Z
+    assert_eq!(p.dtstart.as_deref(), Some("2026-09-14T07:00:00+00:00"));
+    assert!(!p.all_day);
+    assert_eq!(
+        p.rrule.as_deref(),
+        Some("FREQ=WEEKLY;BYDAY=MO,WE"),
+        "rrule={:?}",
+        p.rrule
+    );
+    assert_eq!(p.attendees.len(), 1);
+    assert_eq!(p.attendees[0].email, "alice@example.com");
+    assert_eq!(p.alarms.len(), 1);
+    assert_eq!(p.alarms[0].trigger, "-PT10M");
+}
 
-    #[cfg(test)]
+#[cfg(test)]
 
 mod tests {
     use super::*;
@@ -1204,16 +1253,36 @@ END:VCALENDAR\r\n";
         const ICS: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:ex-1\r\nDTSTAMP:20260126T150000Z\r\nDTSTART;TZID=Europe/Stockholm:20260126T060000\r\nRRULE:FREQ=WEEKLY;BYDAY=MO\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let parsed = parse_ics(ICS, &[]).expect("parse");
         let tz: Tz = "Europe/Stockholm".parse().unwrap();
-        let range_start = "2026-08-10T00:00:00+00:00".parse::<DateTime<Utc>>().unwrap();
-        let range_end = "2026-08-24T23:59:59+00:00".parse::<DateTime<Utc>>().unwrap();
-        let occ_before = expand_rrule_from_raw(ICS, parsed.dtstart.as_deref().unwrap(), parsed.rrule.as_deref().unwrap(), range_start, range_end);
+        let range_start = "2026-08-10T00:00:00+00:00"
+            .parse::<DateTime<Utc>>()
+            .unwrap();
+        let range_end = "2026-08-24T23:59:59+00:00"
+            .parse::<DateTime<Utc>>()
+            .unwrap();
+        let occ_before = expand_rrule_from_raw(
+            ICS,
+            parsed.dtstart.as_deref().unwrap(),
+            parsed.rrule.as_deref().unwrap(),
+            range_start,
+            range_end,
+        );
         assert_eq!(occ_before.len(), 3); // 10, 17, 24
-        // Inject EXDATE for Aug 17
-        let occ_mid = "2026-08-17T04:00:00+00:00".parse::<DateTime<Utc>>().unwrap();
+                                         // Inject EXDATE for Aug 17
+        let occ_mid = "2026-08-17T04:00:00+00:00"
+            .parse::<DateTime<Utc>>()
+            .unwrap();
         let raw2 = inject_exdate(ICS, occ_mid, Some(tz));
-        let occ_after = expand_rrule_from_raw(&raw2, parsed.dtstart.as_deref().unwrap(), parsed.rrule.as_deref().unwrap(), range_start, range_end);
+        let occ_after = expand_rrule_from_raw(
+            &raw2,
+            parsed.dtstart.as_deref().unwrap(),
+            parsed.rrule.as_deref().unwrap(),
+            range_start,
+            range_end,
+        );
         assert_eq!(occ_after.len(), 2);
-        assert!(!occ_after.iter().any(|d| d.timestamp() == occ_mid.timestamp()));
+        assert!(!occ_after
+            .iter()
+            .any(|d| d.timestamp() == occ_mid.timestamp()));
     }
 
     #[test]
@@ -1222,20 +1291,43 @@ END:VCALENDAR\r\n";
         let parsed = parse_ics(ICS, &[]).expect("parse");
         let tz: Tz = "Europe/Stockholm".parse().unwrap();
         // Truncate before Aug 17 (so keep up to Aug 10) — use occurrence -1s
-        let occ = "2026-08-17T04:00:00+00:00".parse::<DateTime<Utc>>().unwrap();
-        let until_wall2 = (occ - chrono::Duration::seconds(1)).with_timezone(&tz).naive_local();
+        let occ = "2026-08-17T04:00:00+00:00"
+            .parse::<DateTime<Utc>>()
+            .unwrap();
+        let until_wall2 = (occ - chrono::Duration::seconds(1))
+            .with_timezone(&tz)
+            .naive_local();
         let raw2 = truncate_rrule_until(ICS, until_wall2, Some(tz), false);
         assert!(raw2.contains("UNTIL="));
-        let new_rrule = raw2.lines().find(|l| l.to_uppercase().starts_with("RRULE")).unwrap().split(':').nth(1).unwrap().to_string();
-        let range_start = "2026-01-01T00:00:00+00:00".parse::<DateTime<Utc>>().unwrap();
-        let range_end = "2026-12-31T23:59:59+00:00".parse::<DateTime<Utc>>().unwrap();
-        let occ_after = expand_rrule_from_raw(&raw2, parsed.dtstart.as_deref().unwrap(), &new_rrule, range_start, range_end);
+        let new_rrule = raw2
+            .lines()
+            .find(|l| l.to_uppercase().starts_with("RRULE"))
+            .unwrap()
+            .split(':')
+            .nth(1)
+            .unwrap()
+            .to_string();
+        let range_start = "2026-01-01T00:00:00+00:00"
+            .parse::<DateTime<Utc>>()
+            .unwrap();
+        let range_end = "2026-12-31T23:59:59+00:00"
+            .parse::<DateTime<Utc>>()
+            .unwrap();
+        let occ_after = expand_rrule_from_raw(
+            &raw2,
+            parsed.dtstart.as_deref().unwrap(),
+            &new_rrule,
+            range_start,
+            range_end,
+        );
         // Should not contain Aug 17 or later
         for o in &occ_after {
             assert!(*o < occ, "found future occ {}", o);
         }
         assert!(!occ_after.iter().any(|d| d.timestamp() == occ.timestamp()));
-        assert!(occ_after.iter().any(|d| d.with_timezone(&tz).format("%Y-%m-%d").to_string() == "2026-08-10"));
+        assert!(occ_after
+            .iter()
+            .any(|d| d.with_timezone(&tz).format("%Y-%m-%d").to_string() == "2026-08-10"));
     }
 
     #[test]

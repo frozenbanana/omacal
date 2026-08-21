@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Omarcal",
-  "version": "0.1.0",
-  "identifier": "com.henry.omarcal",
+  "productName": "Omacal",
+  "version": "0.3.0",
+  "identifier": "com.henry.omacal",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,16 +12,17 @@
   "app": {
     "windows": [
       {
-        "title": "Omarcal",
+        "title": "Omacal",
         "width": 1280,
         "height": 800,
         "minWidth": 900,
         "minHeight": 600,
-        "decorations": false
+        "decorations": false,
+        "backgroundColor": "#2e3440"
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' ipc: http://ipc.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: asset: http://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://* asset: http://asset.localhost"
     },
     "trayIcon": {
       "iconPath": "icons/32x32.png",
@@ -35,6 +36,7 @@
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
     ],

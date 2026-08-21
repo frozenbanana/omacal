@@ -1,10 +1,5 @@
 import { FormEvent, useState } from "react";
-import {
-  addAccount,
-  removeAccount,
-  testAccount,
-  useApp,
-} from "../store";
+import { addAccount, removeAccount, testAccount, useApp } from "../store";
 
 type Props = {
   onClose: () => void;
@@ -66,8 +61,8 @@ export function SettingsModal({ onClose }: Props) {
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>Accounts</h2>
         <p className="muted">
-          Passwords are stored in the system keyring, never in config.toml.
-          Disable vdirsyncer for these calendars to avoid sync races.
+          Passwords are stored in the system keyring, never in config.toml. Disable vdirsyncer for
+          these calendars to avoid sync races.
         </p>
 
         {(config?.accounts || []).map((a) => (
@@ -93,11 +88,7 @@ export function SettingsModal({ onClose }: Props) {
         <form className="form-grid" onSubmit={onAdd}>
           <label>
             Display name
-            <input
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              required
-            />
+            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} required />
           </label>
           <label>
             CalDAV URL
@@ -110,11 +101,7 @@ export function SettingsModal({ onClose }: Props) {
           </label>
           <label>
             Username
-            <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-            />
+            <input value={username} onChange={(e) => setUsername(e.target.value)} required />
           </label>
           <label>
             App password

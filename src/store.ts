@@ -86,6 +86,7 @@ export type ThemeColors = {
   cursor: string;
   selection_foreground: string;
   selection_background: string;
+  muted: string;
   colors: string[];
   light: boolean;
   name: string;
@@ -169,8 +170,10 @@ function applyThemeToDom(t: ThemeColors) {
   root.style.setProperty("--cursor", t.cursor);
   root.style.setProperty("--sel-fg", t.selection_foreground);
   root.style.setProperty("--sel-bg", t.selection_background);
+  root.style.setProperty("--muted", t.muted);
   t.colors.forEach((c, i) => root.style.setProperty(`--color${i}`, c));
   root.dataset.theme = t.light ? "light" : "dark";
+  document.documentElement.style.colorScheme = t.light ? "light" : "dark";
   document.body.style.background = t.background;
   document.body.style.color = t.foreground;
 }
@@ -283,7 +286,7 @@ export const useApp = create<Store>((set, get) => ({
     if (!isTauri()) {
       set({
         calendars: get().calendars.map((c) =>
-          c.id === id ? { ...c, subscribed, visible: subscribed ? true : c.visible } : c,
+          c.id === id ? { ...c, subscribed, visible: subscribed ? true : c.visible } : c
         ),
       });
       return;
@@ -304,7 +307,7 @@ export const useApp = create<Store>((set, get) => ({
           .calendars.map((c) =>
             c.account_id === accountId && order.has(c.id)
               ? { ...c, sort_order: order.get(c.id)! }
-              : c,
+              : c
           )
           .sort((a, b) => a.sort_order - b.sort_order),
       });
@@ -366,8 +369,14 @@ export async function deleteEvent(id: number) {
   return safeInvoke("delete_event", { id });
 }
 
-export async function deleteEventOccurrence(id: number, occurrenceStart: string, mode: "single" | "future" | "all") {
-  return safeInvoke("delete_event_occurrence", { req: { id, occurrence_start: occurrenceStart, mode } });
+export async function deleteEventOccurrence(
+  id: number,
+  occurrenceStart: string,
+  mode: "single" | "future" | "all"
+) {
+  return safeInvoke("delete_event_occurrence", {
+    req: { id, occurrence_start: occurrenceStart, mode },
+  });
 }
 
 export async function respondInvite(eventId: number, partstat: string) {
@@ -377,12 +386,9 @@ export async function respondInvite(eventId: number, partstat: string) {
 }
 
 export async function respondInvitesBulk(eventIds: number[], partstat: string) {
-  return safeInvoke<{ ok: number; failed: number; errors: string[] }>(
-    "respond_invites_bulk",
-    {
-      req: { event_ids: eventIds, partstat },
-    },
-  );
+  return safeInvoke<{ ok: number; failed: number; errors: string[] }>("respond_invites_bulk", {
+    req: { event_ids: eventIds, partstat },
+  });
 }
 
 export async function addAccount(payload: {
@@ -399,11 +405,7 @@ export async function removeAccount(account_id: string) {
   return safeInvoke("remove_account", { accountId: account_id });
 }
 
-export async function testAccount(
-  caldav_url: string,
-  username: string,
-  password: string,
-) {
+export async function testAccount(caldav_url: string, username: string, password: string) {
   return safeInvoke<string[]>("test_account", {
     caldavUrl: caldav_url,
     username,

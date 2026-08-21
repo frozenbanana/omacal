@@ -1,4 +1,4 @@
-# Omarcal
+# Omacal
 
 > Omarchy-native CalDAV calendar for Linux (Hyprland / Arch).
 
@@ -7,8 +7,8 @@ vdirsyncer, no Evolution Data Server. Themed live from your active Omarchy
 `colors.toml`, with desktop notifications via Mako, a tray icon, and a Waybar
 helper.
 
-![License](https://img.shields.io/github/license/frozenbanana/omarcal)
-![Build](https://img.shields.io/github/actions/workflow/status/frozenbanana/omarcal/build.yml?branch=main)
+![License](https://img.shields.io/github/license/frozenbanana/omacal)
+![Build](https://img.shields.io/github/actions/workflow/status/frozenbanana/omacal/build.yml?branch=main)
 
 ---
 
@@ -46,36 +46,47 @@ OAuth, full email iMIP client, macOS/Windows builds.
 
 ## Install
 
-### From a CI build (recommended)
+### Arch / Omarchy (pacman)
+
+```bash
+# From omarchy-pkgs (when published)
+sudo pacman -S omacal
+
+# Or build locally
+makepkg -si  # from repo root (uses PKGBUILD)
+```
+
+### Debian / Ubuntu (`.deb`)
 
 Download the latest `.deb` from the
-[Actions → Build](https://github.com/frozenbanana/omarcal/actions/workflows/build.yml)
-workflow artifacts and install it:
+[Actions → Build](https://github.com/frozenbanana/omacal/actions/workflows/build.yml)
+workflow artifacts:
 
 ```bash
-sudo apt install ./Omarcal_0.1.0_amd64.deb
+sudo apt install ./Omacal_0.3.0_amd64.deb
 ```
 
-### From source (local install)
+### From source (local install, `~/.local`)
 
 ```bash
-chmod +x packaging/install.sh packaging/omarchy-omarcal packaging/omarcal-waybar
-./packaging/install.sh
+chmod +x packaging/install.sh packaging/omarchy-omacal packaging/omacal-waybar
+./packaging/install.sh          # also installs icons + desktop entry to ~/.local
+# Or: ./packaging/install.sh --skip-build   # reuse existing target/release/omacal
 ```
 
-This builds the app, installs it to `~/.local/bin`, registers the desktop entry,
-and sets Omarcal as the default handler for `.ics` files.
+This registers the desktop entry and sets Omacal as the default handler for `.ics` files.
 
 > **Note:** never install a plain `cargo build --release` binary — without
 > Tauri's bundling it loads `http://localhost:1420` and shows a white screen.
 
-### Arch / Omarchy launcher
+### Omarchy launcher
 
-Launch with Walker (`Omarcal`) or `omarchy-omarcal` for a floating Hyprland
+Launch from the app menu (`Omacal`) or `omarchy-omacal` for a floating Hyprland
 window. Optional systemd daemon keeps the tray, sync, and alarms alive:
 
 ```bash
-systemctl --user enable --now omarcal-daemon.service
+systemctl --user enable --now omacal.service
+# legacy name still works: omacal-daemon.service
 ```
 
 ## Development
@@ -105,15 +116,15 @@ Data lives in:
 
 | Kind | Path |
 |---|---|
-| Config | `~/.config/omarcal/config.toml` |
-| Database | `~/.local/share/omarcal/omarcal.db` |
-| Secrets | system keyring (service `omarcal`) |
-| Theme | `~/.config/omarchy/current/theme/colors.toml` |
+| Config | `~/.config/omacal/config.toml` |
+| Database | `~/.local/share/omacal/omacal.db` |
+| Secrets | system keyring (service `omacal`) |
+| Theme | `~/.local/state/omarchy/current/theme/colors.toml` (fallback `~/.config/omarchy/current/theme/colors.toml`) |
 
 ## Importing `.ics` files
 
-Omarcal registers the `text/calendar` MIME type. Double-clicking any `.ics`
-in the file manager launches (or wakes) Omarcal and opens the event editor
+Omacal registers the `text/calendar` MIME type. Double-clicking any `.ics`
+in the file manager launches (or wakes) Omacal and opens the event editor
 prefilled with the event — pick a calendar and press **Save**. Imports always
 create a fresh event and can be cancelled without changes.
 
@@ -121,11 +132,13 @@ create a fresh event and can be cancelled without changes.
 
 | Piece | Location |
 |---|---|
-| Theme | Reads `~/.config/omarchy/current/theme/colors.toml` live |
-| Floating launch | `packaging/omarchy-omarcal` |
-| Hyprland rules | `packaging/hypr/omarcal.conf` |
-| Waybar | `packaging/omarcal-waybar` (see `packaging/waybar/omarcal.jsonc`) |
-| Daemon | `packaging/systemd/omarcal-daemon.service` (keeps alarm/sync with tray) |
+| Theme | Reads `~/.local/state/omarchy/current/theme/colors.toml` live (fallback legacy) |
+| Floating launch | `packaging/omarchy-omacal` |
+| Hyprland rules | `packaging/hypr/omacal.lua` (legacy `omacal.conf` still shipped) |
+| Bar widget | `~/.config/omarchy/plugins/henry.omacal` (Quickshell, replaces Waybar `custom/omacal`) |
+| Waybar (legacy) | `packaging/omacal-waybar` (see `packaging/waybar/omacal.jsonc`) |
+| App menu | `packaging/omarchy-menu.jsonc` snippet |
+| Daemon | `packaging/systemd/omacal.service` (alias `omacal-daemon.service`, keeps alarm/sync with tray) |
 
 ## Shortcuts
 
@@ -138,13 +151,13 @@ create a fresh event and can be cancelled without changes.
 
 ## Migration from vdirsyncer / khal
 
-Omarcal owns CalDAV sync. **Do not** run `vdirsyncer` against the same
+Omacal owns CalDAV sync. **Do not** run `vdirsyncer` against the same
 calendars at the same time (edit races).
 
 1. `systemctl --user disable --now vdirsyncer-sync.timer`
 2. Comment out the matching pairs in `~/.config/vdirsyncer/config`
-3. Add the same accounts in Omarcal and sync
-4. Keep `khal` only on a *separate* copy of data, not shared with Omarcal
+3. Add the same accounts in Omacal and sync
+4. Keep `khal` only on a *separate* copy of data, not shared with Omacal
 
 Move plaintext passwords out of the vdirsyncer config and into the keyring /
 Nextcloud app passwords.

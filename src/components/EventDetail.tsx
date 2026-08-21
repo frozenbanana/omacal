@@ -98,9 +98,11 @@ export function EventDetail({ event, onClose, onEdit, onDelete, onRsvp }: Props)
               <div>
                 {(() => {
                   const parsed = parseRRule(event.rrule, event.start || "", tz);
-                  return parsed ? humanize(parsed, tz) : event.rrule;
+                  return parsed ? humanize(parsed) : event.rrule;
                 })()}
-                <div className="muted" style={{ fontSize: "0.68rem" }}>{event.rrule}</div>
+                <div className="muted" style={{ fontSize: "0.68rem" }}>
+                  {event.rrule}
+                </div>
               </div>
             </div>
           )}
@@ -116,8 +118,7 @@ export function EventDetail({ event, onClose, onEdit, onDelete, onRsvp }: Props)
               <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
                 {event.attendees.map((a) => (
                   <li key={a.email}>
-                    {a.cn || a.email}{" "}
-                    <span className="muted">{a.partstat || ""}</span>
+                    {a.cn || a.email} <span className="muted">{a.partstat || ""}</span>
                   </li>
                 ))}
               </ul>
@@ -134,10 +135,7 @@ export function EventDetail({ event, onClose, onEdit, onDelete, onRsvp }: Props)
                 <button
                   key={opt.partstat}
                   type="button"
-                  className={[
-                    opt.className,
-                    current === opt.partstat ? "rsvp-selected" : "",
-                  ]
+                  className={[opt.className, current === opt.partstat ? "rsvp-selected" : ""]
                     .filter(Boolean)
                     .join(" ")}
                   disabled={busy}
@@ -149,7 +147,11 @@ export function EventDetail({ event, onClose, onEdit, onDelete, onRsvp }: Props)
                 </button>
               ))}
             </div>
-            {error && <div className="error" style={{ border: 0, padding: "0.35rem 0" }}>{error}</div>}
+            {error && (
+              <div className="error" style={{ border: 0, padding: "0.35rem 0" }}>
+                {error}
+              </div>
+            )}
           </div>
         )}
 
@@ -159,11 +161,7 @@ export function EventDetail({ event, onClose, onEdit, onDelete, onRsvp }: Props)
               <button type="button" className="primary" onClick={onEdit}>
                 Edit
               </button>
-              <button
-                type="button"
-                className="danger"
-                onClick={() => onDelete()}
-              >
+              <button type="button" className="danger" onClick={() => onDelete()}>
                 Delete
               </button>
             </>

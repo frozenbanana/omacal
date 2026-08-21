@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.henry.omacal</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Omacal</name>
+  <summary>Omarchy-native CalDAV calendar</summary>
+  <description>
+    <p>
+      Fast, local-first calendar that syncs natively with Nextcloud CalDAV.
+      No vdirsyncer, no Evolution Data Server. Live Omarchy theme reload,
+      Mako notifications, tray icon, and Hyprland integration.
+    </p>
+    <p>
+      Features day/week/month/year views, native CalDAV sync-collection,
+      wall-time DST-safe recurrence (EXDATE/UNTIL), Mako alarms, and
+      .ics import. Passwords stay in the system keyring.
+    </p>
+  </description>
+  <launchable type="desktop-id">omacal.desktop</launchable>
+  <provides>
+    <id>omacal.desktop</id>
+  </provides>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Day / Week / Month / Year views with Omarchy Nord theme</caption>
+      <image>https://raw.githubusercontent.com/frozenbanana/omacal/main/packaging/screenshots/main.png</image>
+    </screenshot>
+  </screenshots>
+  <url type="homepage">https://github.com/frozenbanana/omacal</url>
+  <url type="bugtracker">https://github.com/frozenbanana/omacal/issues</url>
+  <developer id="com.henry.omacal">
+    <name>Henry Bergstrom</name>
+  </developer>
+  <kudos>
+    <kudo>OfficeCalendar</kudo>
+    <kudo>ModernToolkit</kudo>
+  </kudos>
+  <categories>
+    <category>Office</category>
+    <category>Calendar</category>
+  </categories>
+  <keywords>
+    <keyword>calendar</keyword>
+    <keyword>caldav</keyword>
+    <keyword>nextcloud</keyword>
+    <keyword>omarchy</keyword>
+    <keyword>hyprland</keyword>
+  </keywords>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.2.0" date="2026-08-21">
+      <description>
+        <p>Omarchy-native packaging, Quickshell widget, click-to-mark, theme harmony, contrast fixes.</p>
+      </description>
+    </release>
+    <release version="0.1.0" date="2026-08-10">
+      <description><p>Initial release.</p></description>
+    </release>
+  </releases>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+</component>

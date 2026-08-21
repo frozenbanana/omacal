@@ -1,0 +1,16 @@
+{
+  // Omacal — paste into ~/.config/omarchy/extensions/omarchy-menu.jsonc
+  // Then: omarchy menu reload  (or restart shell)
+  "personal.calendar": {
+    "icon": "󰃭",
+    "label": "Calendar",
+    "action": "omarchy-omacal",
+    "aliases": ["calendar", "cal"],
+    "description": "Omacal — Omarchy-native CalDAV calendar"
+  },
+  "personal.calendar.today": {
+    "icon": "󰃭",
+    "label": "Today",
+    "action": "omarchy-omacal"
+  }
+}

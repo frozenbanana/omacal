@@ -82,8 +82,7 @@ function toFcEvents(events: CalEvent[], marked: CalEvent | null): FCEventInput[]
     if (!e.start) return [];
     const invite = isInvite(e);
     const statusClass = partstatClass(e);
-    const isMarked =
-      marked != null && e.id === marked.id && e.start === marked.start;
+    const isMarked = marked != null && e.id === marked.id && e.start === marked.start;
     const isRecurringEvent = !!e.rrule;
     const base: FCEventInput = {
       id: `${e.id}:${e.start}`,
@@ -215,7 +214,13 @@ export default function App() {
         }
       }
       await load();
-      showNotice(mode === "single" ? "Removed one occurrence" : mode === "future" ? "Truncated series" : "Deleted series");
+      showNotice(
+        mode === "single"
+          ? "Removed one occurrence"
+          : mode === "future"
+            ? "Truncated series"
+            : "Deleted series"
+      );
     } catch (e) {
       useApp.setState({ error: String(e) });
     }
@@ -237,12 +242,33 @@ export default function App() {
     });
   }, [load]);
 
+  // Fade out the inline splash once the app is ready.
+  useEffect(() => {
+    if (ready) {
+      const splash = document.getElementById("splash");
+      if (splash) {
+        splash.classList.add("hidden");
+        const t = window.setTimeout(() => splash.remove(), 300);
+        return () => window.clearTimeout(t);
+      }
+    }
+  }, [ready]);
+
   useEffect(() => {
     if (pendingImport) {
       openImport(pendingImport);
       setPendingImport(null);
     }
   }, [pendingImport]);
+
+  const fcEvents = useMemo(() => toFcEvents(events, marked), [events, marked]);
+
+  const visibleEvents = useMemo(() => {
+    const visibleIds = new Set(
+      calendars.filter((c) => c.visible && c.subscribed !== false).map((c) => c.id)
+    );
+    return events.filter((e) => visibleIds.has(e.calendar_id));
+  }, [events, calendars]);
 
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
@@ -291,10 +317,6 @@ export default function App() {
       } else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "v") {
         if (!clipboard) return;
         ev.preventDefault();
-        if (!lastClickedDay) {
-          showNotice("Click a day first");
-          return;
-        }
         void (async () => {
           try {
             await pasteClipboard();
@@ -303,9 +325,23 @@ export default function App() {
             useApp.setState({ error: String(e) });
           }
         })();
-      } else if (ev.key === "Escape" && marked) {
-        ev.preventDefault();
-        setMarked(null);
+      } else if (ev.key === "Escape") {
+        // Stack: close detail drawer → clear mark → clear anchor.
+        if (selected) {
+          ev.preventDefault();
+          setSelected(null);
+          return;
+        }
+        if (marked) {
+          ev.preventDefault();
+          setMarked(null);
+          return;
+        }
+        if (lastClickedDay) {
+          ev.preventDefault();
+          setLastClickedDay(null);
+          return;
+        }
       } else if ((ev.key === "Delete" || ev.key === "Backspace") && marked) {
         ev.preventDefault();
         if (marked.readonly) {
@@ -315,28 +351,92 @@ export default function App() {
         const evMarked = marked;
         setMarked(null);
         requestDelete(evMarked);
-      } else if (ev.key === "ArrowLeft" && !ev.metaKey && !ev.ctrlKey) {
-        calRef.current?.getApi().prev();
-      } else if (ev.key === "ArrowRight" && !ev.metaKey && !ev.ctrlKey) {
-        calRef.current?.getApi().next();
-      } else if (ev.key === "e" && selected) {
-        openEdit(selected);
+      } else if (ev.key === "ArrowLeft" || ev.key === "ArrowUp") {
+        if (ev.metaKey || ev.ctrlKey) {
+          ev.preventDefault();
+          calRef.current?.getApi().prev();
+          return;
+        }
+        // Apple-style: plain arrows navigate event selection.
+        if (visibleEvents.length > 0) {
+          ev.preventDefault();
+          const sorted = [...visibleEvents].sort((a, b) =>
+            (a.start || "").localeCompare(b.start || "")
+          );
+          if (!marked) {
+            const first = sorted[0];
+            setMarked(first);
+            if (first.start) setLastClickedDay(new Date(first.start));
+            requestAnimationFrame(() => {
+              document
+                .querySelector(`[data-event-id="${first.id}:${first.start}"]`)
+                ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+            });
+          } else {
+            const idx = sorted.findIndex((e) => e.id === marked.id && e.start === marked.start);
+            const nextIdx = idx <= 0 ? sorted.length - 1 : idx - 1;
+            const next = sorted[nextIdx];
+            setMarked(next);
+            if (next.start) setLastClickedDay(new Date(next.start));
+            requestAnimationFrame(() => {
+              document
+                .querySelector(`[data-event-id="${next.id}:${next.start}"]`)
+                ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+            });
+          }
+        }
+      } else if (ev.key === "ArrowRight" || ev.key === "ArrowDown") {
+        if (ev.metaKey || ev.ctrlKey) {
+          ev.preventDefault();
+          calRef.current?.getApi().next();
+          return;
+        }
+        if (visibleEvents.length > 0) {
+          ev.preventDefault();
+          const sorted = [...visibleEvents].sort((a, b) =>
+            (a.start || "").localeCompare(b.start || "")
+          );
+          if (!marked) {
+            const first = sorted[0];
+            setMarked(first);
+            if (first.start) setLastClickedDay(new Date(first.start));
+            requestAnimationFrame(() => {
+              document
+                .querySelector(`[data-event-id="${first.id}:${first.start}"]`)
+                ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+            });
+          } else {
+            const idx = sorted.findIndex((e) => e.id === marked.id && e.start === marked.start);
+            const nextIdx = idx >= sorted.length - 1 ? 0 : idx + 1;
+            const next = sorted[nextIdx];
+            setMarked(next);
+            if (next.start) setLastClickedDay(new Date(next.start));
+            requestAnimationFrame(() => {
+              document
+                .querySelector(`[data-event-id="${next.id}:${next.start}"]`)
+                ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+            });
+          }
+        }
+      } else if (ev.key === "e" && (marked || selected)) {
+        const target = marked ?? selected;
+        if (target) openEdit(target);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, calendars, config, defaultCalendarId, marked, clipboard, lastClickedDay, showEditor, showSettings]);
-
-  const fcEvents = useMemo(() => toFcEvents(events, marked), [events, marked]);
-
-  const visibleEvents = useMemo(() => {
-    const visibleIds = new Set(
-      calendars
-        .filter((c) => c.visible && c.subscribed !== false)
-        .map((c) => c.id),
-    );
-    return events.filter((e) => visibleIds.has(e.calendar_id));
-  }, [events, calendars]);
+  }, [
+    selected,
+    calendars,
+    config,
+    defaultCalendarId,
+    marked,
+    clipboard,
+    lastClickedDay,
+    showEditor,
+    showSettings,
+    visibleEvents,
+  ]);
 
   async function rsvpFromCalendar(ev: CalEvent, partstat: string) {
     if (rsvpBusyId != null) return;
@@ -407,10 +507,7 @@ export default function App() {
     }
 
     return (
-      <div
-        className="fc-invite-body"
-        style={{ ["--invite-color" as string]: color }}
-      >
+      <div className="fc-invite-body" style={{ ["--invite-color" as string]: color }}>
         <div className="fc-invite-main">
           {arg.timeText && <span className="fc-event-time">{arg.timeText}</span>}
           <span className="fc-event-title">{title}</span>
@@ -475,9 +572,7 @@ export default function App() {
     const defaultCal =
       preferred ||
       (defaultCalendarId != null
-        ? subscribed.find(
-            (c) => c.id === defaultCalendarId && c.visible && !c.readonly,
-          )
+        ? subscribed.find((c) => c.id === defaultCalendarId && c.visible && !c.readonly)
         : undefined);
     return (
       defaultCal ||
@@ -551,9 +646,7 @@ export default function App() {
     const subscribed = s.calendars.filter((c) => c.subscribed !== false);
     const defaultCal =
       s.defaultCalendarId != null
-        ? subscribed.find(
-            (c) => c.id === s.defaultCalendarId && c.visible && !c.readonly,
-          )
+        ? subscribed.find((c) => c.id === s.defaultCalendarId && c.visible && !c.readonly)
         : undefined;
     const target =
       defaultCal ||
@@ -582,23 +675,51 @@ export default function App() {
     setShowEditor(true);
   }
 
-
   async function onSelect(sel: DateSelectArg) {
+    setMarked(null);
+    setSelected(null);
+    setLastClickedDay(sel.start);
     openNew(sel.start, sel.end, sel.allDay);
   }
 
   function onDateClick(arg: DateClickArg) {
+    // Clicking empty space clears the current mark and anchors the paste target.
+    setMarked(null);
+    setSelected(null);
     setLastClickedDay(arg.date);
+    // Double-click on an empty slot creates a new 1-hour event (iCalendar style).
+    if (arg.jsEvent.detail === 2) {
+      const start = arg.date;
+      const end = new Date(start.getTime() + 60 * 60 * 1000);
+      openNew(start, end, arg.allDay);
+    }
   }
 
   function onEventClick(arg: EventClickArg) {
     const ev = arg.event.extendedProps.calEvent as CalEvent;
-    if (arg.jsEvent.shiftKey) {
+    // Double-click opens the editor (iCalendar style). The first click already
+    // marked the event; the second click (detail === 2) edits it.
+    if (arg.jsEvent.detail === 2) {
       arg.jsEvent.preventDefault();
-      setMarked((prev) => (prev?.id === ev.id ? null : ev));
+      setMarked(ev);
+      setSelected(null);
+      openEdit(ev);
       return;
     }
-    setSelected(ev);
+    // Shift+Click is reserved for additive multi-select (v1 toggles single).
+    if (arg.jsEvent.shiftKey) {
+      arg.jsEvent.preventDefault();
+      setMarked((prev) =>
+        prev != null && prev.id === ev.id && prev.start === ev.start ? null : ev
+      );
+      setSelected(null);
+      return;
+    }
+    // Single click: mark (highlight) exclusively; clicking an already-marked
+    // event unmarks it.
+    setSelected(null);
+    setMarked((prev) => (prev != null && prev.id === ev.id && prev.start === ev.start ? null : ev));
+    if (ev.start) setLastClickedDay(new Date(ev.start));
   }
 
   async function persistMove(arg: EventDropArg | EventResizeDoneArg) {
@@ -619,9 +740,7 @@ export default function App() {
         dtstart: arg.event.start
           ? toDraftWallClock(arg.event.start, arg.event.allDay, tz)
           : ev.start || "",
-        dtend: arg.event.end
-          ? toDraftWallClock(arg.event.end, arg.event.allDay, tz)
-          : ev.end || "",
+        dtend: arg.event.end ? toDraftWallClock(arg.event.end, arg.event.allDay, tz) : ev.end || "",
         all_day: arg.event.allDay,
         timezone: tz,
         rrule: ev.rrule,
@@ -639,8 +758,15 @@ export default function App() {
 
   async function pasteClipboard() {
     const src = clipboard;
-    const day = lastClickedDay;
-    if (!src || !day) return;
+    if (!src) return;
+    // Paste target: last clicked day, else fall back to the marked/source event's
+    // own day (duplicate adjacent). Keeps source wall-clock HH:mm on that date.
+    const day =
+      lastClickedDay ??
+      (marked ? new Date(marked.start || src.start || "") : new Date(src.start || ""));
+    if (Number.isNaN(day.getTime())) {
+      throw new Error("no paste target date");
+    }
 
     const tz = config?.locale.timezone || "Europe/Stockholm";
     const sStart = new Date(src.start || "");
@@ -707,8 +833,13 @@ export default function App() {
     const tz = config?.locale.timezone || "Europe/Stockholm";
     info.el.setAttribute(
       "aria-label",
-      ev.all_day ? ev.title : `${eventTimeLabel(ev, is24h, tz)}, ${ev.title}`,
+      ev.all_day ? ev.title : `${eventTimeLabel(ev, is24h, tz)}, ${ev.title}`
     );
+    info.el.setAttribute("data-event-id", `${ev.id}:${ev.start}`);
+    // Title hint for discoverability
+    if (!info.el.getAttribute("title")) {
+      info.el.setAttribute("title", "Double-click to edit");
+    }
   }
 
   function openDayPopover(arg: MoreLinkArg) {
@@ -719,12 +850,12 @@ export default function App() {
       : { left: 0, top: 0, right: 0, bottom: 0 };
     const tz = config?.locale.timezone || "Europe/Stockholm";
     const key = dayKey(arg.date, tz);
-    const timed = getTimedEventsForDayKey(visibleEvents, key, tz).slice().sort((a, b) =>
-      (a.start || "").localeCompare(b.start || ""),
-    );
-    const allDay = getAllDayEventsForDayKey(visibleEvents, key, tz).slice().sort((a, b) =>
-      (a.start || "").localeCompare(b.start || ""),
-    );
+    const timed = getTimedEventsForDayKey(visibleEvents, key, tz)
+      .slice()
+      .sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+    const allDay = getAllDayEventsForDayKey(visibleEvents, key, tz)
+      .slice()
+      .sort((a, b) => (a.start || "").localeCompare(b.start || ""));
     setDayPopover({ date: arg.date, events: [...allDay, ...timed], anchor });
     // Truthy non-string return: suppress FullCalendar's built-in popover + nav.
     return true as unknown as string;
@@ -747,19 +878,24 @@ export default function App() {
   const tzMismatch = !!config && !!systemTz && systemTz !== config.locale.timezone;
 
   if (!ready) {
-    return <div className="app" style={{ placeItems: "center", display: "grid" }}>Loading…</div>;
+    // Splash (pulsating calendar icon) is shown in index.html until ready.
+    return null;
   }
 
   return (
     <div className="app">
       <aside className="sidebar">
         <div className="brand" data-tauri-drag-region="deep">
-          <h1>Omarcal</h1>
+          <h1>Omacal</h1>
           <p>
             {theme?.name || "omarchy"} · {config?.locale.timezone || "UTC"}
             {tzMismatch && (
-              <span title={`System timezone ${systemTz} differs from calendar timezone ${config?.locale.timezone}. Times are shown in ${config?.locale.timezone}.`} style={{ color: "var(--muted)", fontSize: "0.7em" }}>
-                {" "}· system {systemTz}
+              <span
+                title={`System timezone ${systemTz} differs from calendar timezone ${config?.locale.timezone}. Times are shown in ${config?.locale.timezone}.`}
+                style={{ color: "var(--muted)", fontSize: "0.7em" }}
+              >
+                {" "}
+                · system {systemTz}
               </span>
             )}
           </p>
@@ -778,7 +914,13 @@ export default function App() {
                 <button
                   key={r.id}
                   className="search-hit"
-                  onClick={() => setSelected(r)}
+                  onClick={() => {
+                    setSelected(null);
+                    setMarked((prev) =>
+                      prev != null && prev.id === r.id && prev.start === r.start ? null : r
+                    );
+                    if (r.start) setLastClickedDay(new Date(r.start));
+                  }}
                 >
                   {r.title}
                   <div className="muted">{r.start}</div>
@@ -908,6 +1050,21 @@ export default function App() {
             events={view === "multiMonthYear" ? [] : fcEvents}
             eventContent={renderEventContent}
             eventDidMount={handleEventMount}
+            dayCellClassNames={(arg: { date: Date }) => {
+              if (!lastClickedDay || !arg.date) return [];
+              const tz = config?.locale.timezone || "Europe/Stockholm";
+              const a = DateTime.fromJSDate(arg.date, { zone: tz }).startOf("day");
+              const b = DateTime.fromJSDate(lastClickedDay, { zone: tz }).startOf("day");
+              return a.hasSame(b, "day") ? ["om-paste-anchor"] : [];
+            }}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            slotLaneClassNames={(arg: any) => {
+              if (!lastClickedDay || !arg.date) return [];
+              const tz = config?.locale.timezone || "Europe/Stockholm";
+              const a = DateTime.fromJSDate(arg.date as Date, { zone: tz }).startOf("day");
+              const b = DateTime.fromJSDate(lastClickedDay, { zone: tz }).startOf("day");
+              return a.hasSame(b, "day") ? ["om-paste-anchor"] : [];
+            }}
             datesSet={(info) => {
               setNavTitle(info.view.title);
               setCurrentDate(info.start);
@@ -945,9 +1102,7 @@ export default function App() {
             await respondInvite(selected.id, partstat);
             await load();
             // Keep detail open with refreshed event
-            const next = useApp
-              .getState()
-              .events.find((e) => e.id === selected.id);
+            const next = useApp.getState().events.find((e) => e.id === selected.id);
             if (next) setSelected(next);
             else setSelected(null);
           }}
@@ -963,7 +1118,11 @@ export default function App() {
           onClose={() => setDayPopover(null)}
           onSelectEvent={(ev) => {
             setDayPopover(null);
-            setSelected(ev);
+            setSelected(null);
+            setMarked((prev) =>
+              prev != null && prev.id === ev.id && prev.start === ev.start ? null : ev
+            );
+            if (ev.start) setLastClickedDay(new Date(ev.start));
           }}
         />
       )}
@@ -984,9 +1143,7 @@ export default function App() {
         />
       )}
 
-      {showSettings && (
-        <SettingsModal onClose={() => setShowSettings(false)} />
-      )}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
 
       {pendingDelete && (
         <ConfirmRecurrenceDelete

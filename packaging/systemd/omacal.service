@@ -1,0 +1,16 @@
+[Unit]
+Description=Omacal calendar sync and alarm daemon
+After=graphical-session.target
+PartOf=graphical-session.target
+ConditionEnvironment=WAYLAND_DISPLAY
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/omacal
+Restart=on-failure
+RestartSec=5
+Environment=RUST_LOG=info
+Environment=OMACAL_START_HIDDEN=1
+
+[Install]
+WantedBy=graphical-session.target

@@ -56,8 +56,7 @@ pub struct UiEvent {
 }
 
 fn to_ui(ev: EventRow, cal: Option<&CalendarRow>) -> UiEvent {
-    let attendees: Vec<AttendeeInfo> =
-        serde_json::from_str(&ev.attendees_json).unwrap_or_default();
+    let attendees: Vec<AttendeeInfo> = serde_json::from_str(&ev.attendees_json).unwrap_or_default();
     let alarms: Vec<AlarmInfo> = serde_json::from_str(&ev.alarms_json).unwrap_or_default();
     UiEvent {
         id: ev.id,
@@ -72,10 +71,10 @@ fn to_ui(ev: EventRow, cal: Option<&CalendarRow>) -> UiEvent {
         end: ev.dtend.clone(),
         all_day: ev.all_day,
         rrule: ev.rrule.clone(),
-        color: cal.map(|c| c.color.clone()).unwrap_or_else(|| "#829dd4".into()),
-        calendar_name: cal
-            .map(|c| c.displayname.clone())
-            .unwrap_or_default(),
+        color: cal
+            .map(|c| c.color.clone())
+            .unwrap_or_else(|| "#829dd4".into()),
+        calendar_name: cal.map(|c| c.displayname.clone()).unwrap_or_default(),
         status: ev.status,
         organizer: ev.organizer,
         attendees,
@@ -168,10 +167,7 @@ pub fn get_snapshot(state: State<'_, AppState>) -> Result<AppSnapshot, String> {
         let cals: std::collections::HashMap<i64, CalendarRow> =
             calendars.iter().cloned().map(|c| (c.id, c)).collect();
         let mut seen_uids = std::collections::HashSet::new();
-        let mut rows = state
-            .db
-            .pending_invites()
-            .map_err(|e| e.to_string())?;
+        let mut rows = state.db.pending_invites().map_err(|e| e.to_string())?;
         // Prefer own calendars over shared copies of the same UID
         rows.sort_by_key(|e| {
             let shared = cals
@@ -288,8 +284,7 @@ pub fn take_pending_imports(state: State<'_, AppState>) -> Result<Vec<String>, S
 #[tauri::command]
 pub async fn add_account(req: AddAccountRequest) -> Result<AccountConfig, String> {
     // test first
-    let names =
-        SyncEngine::test_connection(&req.caldav_url, &req.username, &req.password).await?;
+    let names = SyncEngine::test_connection(&req.caldav_url, &req.username, &req.password).await?;
     if names.is_empty() {
         return Err("Connected but no calendars found".into());
     }
@@ -355,7 +350,11 @@ pub fn set_calendar_visible(
 }
 
 #[tauri::command]
-pub fn set_calendar_color(state: State<'_, AppState>, id: i64, color: String) -> Result<(), String> {
+pub fn set_calendar_color(
+    state: State<'_, AppState>,
+    id: i64,
+    color: String,
+) -> Result<(), String> {
     state
         .db
         .set_calendar_color(id, &color)
@@ -375,14 +374,8 @@ pub fn set_calendar_subscribed(
 }
 
 #[tauri::command]
-pub fn set_default_calendar(
-    state: State<'_, AppState>,
-    id: Option<i64>,
-) -> Result<(), String> {
-    state
-        .db
-        .set_default_calendar(id)
-        .map_err(|e| e.to_string())
+pub fn set_default_calendar(state: State<'_, AppState>, id: Option<i64>) -> Result<(), String> {
+    state.db.set_default_calendar(id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -407,10 +400,7 @@ pub fn search_events(state: State<'_, AppState>, query: String) -> Result<Vec<Ui
     let calendars = state.db.list_calendars().map_err(|e| e.to_string())?;
     let map: std::collections::HashMap<i64, CalendarRow> =
         calendars.into_iter().map(|c| (c.id, c)).collect();
-    let events = state
-        .db
-        .search_events(&query)
-        .map_err(|e| e.to_string())?;
+    let events = state.db.search_events(&query).map_err(|e| e.to_string())?;
     Ok(events
         .into_iter()
         .map(|e| {
@@ -461,8 +451,7 @@ pub async fn save_event(state: State<'_, AppState>, input: EventInput) -> Result
         None
     };
 
-    let (uid, ics_body) =
-        ics::build_ics(&input, existing.as_ref().map(|e| e.uid.as_str()))?;
+    let (uid, ics_body) = ics::build_ics(&input, existing.as_ref().map(|e| e.uid.as_str()))?;
     let href = input
         .href
         .clone()
@@ -596,24 +585,40 @@ pub async fn delete_event_occurrence(
             .map(|d| d.with_timezone(&chrono::Utc))
             .or_else(|_| {
                 chrono::NaiveDateTime::parse_from_str(&req.occurrence_start, "%Y-%m-%dT%H:%M:%S")
-                    .map(|n| chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(n, chrono::Utc))
+                    .map(|n| {
+                        chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(n, chrono::Utc)
+                    })
             })
             .or_else(|_| {
                 chrono::NaiveDateTime::parse_from_str(&req.occurrence_start, "%Y-%m-%d %H:%M:%S")
-                    .map(|n| chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(n, chrono::Utc))
+                    .map(|n| {
+                        chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(n, chrono::Utc)
+                    })
             })
             .map_err(|_| format!("cannot parse occurrence_start {}", req.occurrence_start))?
     } else {
         // All-day date
-        let d = chrono::NaiveDate::parse_from_str(&req.occurrence_start[..10.min(req.occurrence_start.len())], "%Y-%m-%d")
-            .map_err(|_| format!("cannot parse occurrence date {}", req.occurrence_start))?;
+        let d = chrono::NaiveDate::parse_from_str(
+            &req.occurrence_start[..10.min(req.occurrence_start.len())],
+            "%Y-%m-%d",
+        )
+        .map_err(|_| format!("cannot parse occurrence date {}", req.occurrence_start))?;
         let ndt = d.and_hms_opt(0, 0, 0).unwrap();
         // Use calendar tz for all-day wall
-        let tz = row.raw_ics.lines().find(|l| l.to_uppercase().contains("DTSTART")).and_then(|_| {
-            ics::extract_wall_dt_and_tz(&row.raw_ics, "DTSTART").and_then(|(_, tz, _)| tz)
-        }).or_else(|| cfg.locale.timezone.parse::<chrono_tz::Tz>().ok());
+        let tz = row
+            .raw_ics
+            .lines()
+            .find(|l| l.to_uppercase().contains("DTSTART"))
+            .and_then(|_| {
+                ics::extract_wall_dt_and_tz(&row.raw_ics, "DTSTART").and_then(|(_, tz, _)| tz)
+            })
+            .or_else(|| cfg.locale.timezone.parse::<chrono_tz::Tz>().ok());
         if let Some(tz) = tz {
-            if let Some(ldt) = tz.from_local_datetime(&ndt).single().or_else(|| tz.from_local_datetime(&ndt).earliest()) {
+            if let Some(ldt) = tz
+                .from_local_datetime(&ndt)
+                .single()
+                .or_else(|| tz.from_local_datetime(&ndt).earliest())
+            {
                 ldt.with_timezone(&chrono::Utc)
             } else {
                 chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(ndt, chrono::Utc)
@@ -626,14 +631,17 @@ pub async fn delete_event_occurrence(
     let new_raw = match req.mode.as_str() {
         "single" => {
             // Detect DTSTART tz for EXDATE form
-            let dtstart_tz = ics::extract_wall_dt_and_tz(&row.raw_ics, "DTSTART").and_then(|(_, tz, _)| tz);
+            let dtstart_tz =
+                ics::extract_wall_dt_and_tz(&row.raw_ics, "DTSTART").and_then(|(_, tz, _)| tz);
             ics::inject_exdate(&row.raw_ics, parsed_occ, dtstart_tz)
         }
         "future" => {
             // UNTIL = occurrence - 1s (excludes this and future)
             let until_utc = parsed_occ - chrono::Duration::seconds(1);
             let dtstart_info = ics::extract_wall_dt_and_tz(&row.raw_ics, "DTSTART");
-            let until_tz = dtstart_info.and_then(|(_, tz, _)| tz).or_else(|| cfg.locale.timezone.parse::<chrono_tz::Tz>().ok());
+            let until_tz = dtstart_info
+                .and_then(|(_, tz, _)| tz)
+                .or_else(|| cfg.locale.timezone.parse::<chrono_tz::Tz>().ok());
             // For all-day we want date-only UNTIL (occurrence date -1)
             if row.all_day {
                 let until_date = (parsed_occ - chrono::Duration::days(1)).date_naive();
@@ -671,26 +679,50 @@ pub async fn delete_event_occurrence(
             };
             if let Some(until_s) = until_opt {
                 let until_utc = if until_s.ends_with('Z') {
-                    chrono::DateTime::parse_from_str(&until_s, "%Y%m%dT%H%M%SZ").ok().map(|d| d.with_timezone(&chrono::Utc))
-                } else if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(&until_s, "%Y%m%dT%H%M%S") {
+                    chrono::DateTime::parse_from_str(&until_s, "%Y%m%dT%H%M%SZ")
+                        .ok()
+                        .map(|d| d.with_timezone(&chrono::Utc))
+                } else if let Ok(ndt) =
+                    chrono::NaiveDateTime::parse_from_str(&until_s, "%Y%m%dT%H%M%S")
+                {
                     if let Some(tz) = tz {
-                        tz.from_local_datetime(&ndt).single().or_else(|| tz.from_local_datetime(&ndt).earliest()).map(|ldt| ldt.with_timezone(&chrono::Utc))
+                        tz.from_local_datetime(&ndt)
+                            .single()
+                            .or_else(|| tz.from_local_datetime(&ndt).earliest())
+                            .map(|ldt| ldt.with_timezone(&chrono::Utc))
                     } else {
-                        Some(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(ndt, chrono::Utc))
+                        Some(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+                            ndt,
+                            chrono::Utc,
+                        ))
                     }
                 } else if let Ok(d) = chrono::NaiveDate::parse_from_str(&until_s, "%Y%m%d") {
-                    let ndt = d.and_hms_opt(0,0,0).unwrap();
+                    let ndt = d.and_hms_opt(0, 0, 0).unwrap();
                     if let Some(tz) = tz {
-                        tz.from_local_datetime(&ndt).single().or_else(|| tz.from_local_datetime(&ndt).earliest()).map(|ldt| ldt.with_timezone(&chrono::Utc))
+                        tz.from_local_datetime(&ndt)
+                            .single()
+                            .or_else(|| tz.from_local_datetime(&ndt).earliest())
+                            .map(|ldt| ldt.with_timezone(&chrono::Utc))
                     } else {
-                        Some(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(ndt, chrono::Utc))
+                        Some(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+                            ndt,
+                            chrono::Utc,
+                        ))
                     }
-                } else { None };
+                } else {
+                    None
+                };
                 if let (Some(u), Some(start_utc)) = (until_utc, {
                     if let Some(tz) = tz {
-                        tz.from_local_datetime(&wall_start).single().or_else(|| tz.from_local_datetime(&wall_start).earliest()).map(|ldt| ldt.with_timezone(&chrono::Utc))
+                        tz.from_local_datetime(&wall_start)
+                            .single()
+                            .or_else(|| tz.from_local_datetime(&wall_start).earliest())
+                            .map(|ldt| ldt.with_timezone(&chrono::Utc))
                     } else {
-                        Some(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(wall_start, chrono::Utc))
+                        Some(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+                            wall_start,
+                            chrono::Utc,
+                        ))
                     }
                 }) {
                     if u < start_utc {
@@ -704,7 +736,13 @@ pub async fn delete_event_occurrence(
 
     let new_etag = state
         .sync
-        .push_event(&account, &cal.href, &row.href, &new_raw, row.etag.as_deref())
+        .push_event(
+            &account,
+            &cal.href,
+            &row.href,
+            &new_raw,
+            row.etag.as_deref(),
+        )
         .await?;
 
     let tz_hint = ics::extract_wall_dt_and_tz(&new_raw, "DTSTART")
@@ -759,11 +797,7 @@ pub struct BulkRsvpResult {
     pub errors: Vec<String>,
 }
 
-async fn apply_rsvp(
-    state: &AppState,
-    event_id: i64,
-    partstat: &str,
-) -> Result<UiEvent, String> {
+async fn apply_rsvp(state: &AppState, event_id: i64, partstat: &str) -> Result<UiEvent, String> {
     let cfg = config::load_config().map_err(|e| e.to_string())?;
     let initial = state
         .db
@@ -915,7 +949,10 @@ fn normalize_partstat(partstat: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn respond_invite(state: State<'_, AppState>, req: RsvpRequest) -> Result<UiEvent, String> {
+pub async fn respond_invite(
+    state: State<'_, AppState>,
+    req: RsvpRequest,
+) -> Result<UiEvent, String> {
     let partstat = normalize_partstat(&req.partstat)?;
     apply_rsvp(&state, req.event_id, &partstat).await
 }
@@ -946,10 +983,7 @@ pub async fn respond_invites_bulk(
 #[tauri::command]
 pub fn next_event(state: State<'_, AppState>) -> Result<Option<UiEvent>, String> {
     let now = chrono::Utc::now();
-    let row = state
-        .db
-        .next_event_after(&now)
-        .map_err(|e| e.to_string())?;
+    let row = state.db.next_event_after(&now).map_err(|e| e.to_string())?;
     match row {
         Some(e) => {
             let cal = state.db.get_calendar(e.calendar_id).ok().flatten();
@@ -974,8 +1008,9 @@ pub async fn freebusy(
         .find(|a| a.id == account_id)
         .ok_or_else(|| "account not found".to_string())?;
     let password = secrets::get_password(&account.id)?;
-    let client = crate::caldav::CalDavClient::new(&account.caldav_url, &account.username, &password)
-        .map_err(|e| e.to_string())?;
+    let client =
+        crate::caldav::CalDavClient::new(&account.caldav_url, &account.username, &password)
+            .map_err(|e| e.to_string())?;
     let principal = client
         .discover_principal()
         .await

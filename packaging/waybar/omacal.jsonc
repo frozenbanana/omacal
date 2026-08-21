@@ -1,0 +1,16 @@
+# Add to waybar modules-left/center/right:
+#   "custom/omacal"
+#
+# "custom/omacal": {
+#   "exec": "omacal-waybar",
+#   "interval": 60,
+#   "return-type": "json",
+#   "on-click": "omarchy-omacal",
+#   "tooltip": true
+# }
+
+{
+  "text": "󰃭",
+  "tooltip": "Omacal",
+  "class": "omacal"
+}

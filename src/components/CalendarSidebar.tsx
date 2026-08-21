@@ -48,8 +48,7 @@ export function CalendarSidebar() {
         .filter((c) => c.subscribed !== false)
         .sort(
           (a, b) =>
-            (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
-            a.displayname.localeCompare(b.displayname),
+            (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.displayname.localeCompare(b.displayname)
         );
       const unsubscribed = all
         .filter((c) => c.subscribed === false)
@@ -58,10 +57,7 @@ export function CalendarSidebar() {
     });
   }, [calendars, accounts]);
 
-  const unsubscribedTotal = groups.reduce(
-    (n, g) => n + g.unsubscribed.length,
-    0,
-  );
+  const unsubscribedTotal = groups.reduce((n, g) => n + g.unsubscribed.length, 0);
 
   function accountLabel(account: Account | undefined, accountId: string) {
     return account?.display_name || accountId.slice(0, 8);
@@ -81,7 +77,7 @@ export function CalendarSidebar() {
 
   async function onUnsubscribe(id: number) {
     const ok = window.confirm(
-      "Stop syncing this calendar in Omarcal? It stays on Nextcloud and you can restore it later.",
+      "Stop syncing this calendar in Omacal? It stays on Nextcloud and you can restore it later."
     );
     if (!ok) return;
     closeMenu();
@@ -115,15 +111,10 @@ export function CalendarSidebar() {
     await reorderCalendars(accountId, ids);
   }
 
-  const menuCal = menu
-    ? calendars.find((c) => c.id === menu.calendarId)
-    : null;
+  const menuCal = menu ? calendars.find((c) => c.id === menu.calendarId) : null;
 
   return (
-    <div
-      className="sidebar-section calendar-sidebar"
-      style={{ flex: 1, overflow: "auto" }}
-    >
+    <div className="sidebar-section calendar-sidebar" style={{ flex: 1, overflow: "auto" }}>
       <h2>Calendars</h2>
       {calendars.length === 0 && (
         <p className="muted">Add a Nextcloud account to sync calendars.</p>
@@ -132,9 +123,7 @@ export function CalendarSidebar() {
       {groups.map(({ accountId, account, subscribed }) => (
         <div key={accountId} className="cal-account-group">
           {(accounts.length > 1 || groups.length > 1) && (
-            <div className="cal-account-label">
-              {accountLabel(account, accountId)}
-            </div>
+            <div className="cal-account-label">{accountLabel(account, accountId)}</div>
           )}
 
           {subscribed.map((c) => (
@@ -170,11 +159,7 @@ export function CalendarSidebar() {
               }}
               onContextMenu={(e) => openMenu(e, c.id)}
             >
-              <span
-                className="cal-drag-handle"
-                title="Drag to reorder"
-                aria-hidden
-              >
+              <span className="cal-drag-handle" title="Drag to reorder" aria-hidden>
                 ⋮⋮
               </span>
               <input
@@ -222,9 +207,7 @@ export function CalendarSidebar() {
                 <div key={c.id} className="cal-row unsubscribed">
                   <span className="swatch" style={{ background: c.color }} />
                   <span className="cal-name muted">
-                    {accounts.length > 1
-                      ? `${accountLabel(account, accountId)} · `
-                      : ""}
+                    {accounts.length > 1 ? `${accountLabel(account, accountId)} · ` : ""}
                     {c.displayname}
                   </span>
                   <button
@@ -235,7 +218,7 @@ export function CalendarSidebar() {
                     Restore
                   </button>
                 </div>
-              )),
+              ))
             )}
         </div>
       )}
@@ -243,11 +226,7 @@ export function CalendarSidebar() {
       {menu && menuCal && (
         <>
           <div className="cal-menu-backdrop" onClick={closeMenu} />
-          <div
-            className="cal-context-menu"
-            style={{ left: menu.x, top: menu.y }}
-            role="menu"
-          >
+          <div className="cal-context-menu" style={{ left: menu.x, top: menu.y }} role="menu">
             {!menuCal.readonly && (
               <button
                 type="button"
@@ -257,16 +236,10 @@ export function CalendarSidebar() {
                   await setDefaultCalendar(menuCal.id);
                 }}
               >
-                {defaultCalendarId === menuCal.id
-                  ? "Default calendar ★"
-                  : "Set as default"}
+                {defaultCalendarId === menuCal.id ? "Default calendar ★" : "Set as default"}
               </button>
             )}
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => setColorFor(menuCal.id)}
-            >
+            <button type="button" role="menuitem" onClick={() => setColorFor(menuCal.id)}>
               Change color…
             </button>
             {colorFor === menuCal.id && (

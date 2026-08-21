@@ -45,13 +45,13 @@ impl Default for AppConfig {
 pub fn config_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("omarcal")
+        .join("omacal")
 }
 
 pub fn data_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("omarcal")
+        .join("omacal")
 }
 
 pub fn config_path() -> PathBuf {
@@ -59,18 +59,41 @@ pub fn config_path() -> PathBuf {
 }
 
 pub fn db_path() -> PathBuf {
-    data_dir().join("omarcal.db")
+    data_dir().join("omacal.db")
+}
+
+fn legacy_config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("omarcal")
+        .join("config.toml")
 }
 
 pub fn ensure_dirs() -> anyhow::Result<()> {
     fs::create_dir_all(config_dir())?;
     fs::create_dir_all(data_dir())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for dir in [config_dir(), data_dir()] {
+            let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
+        }
+    }
     Ok(())
 }
 
 pub fn load_config() -> anyhow::Result<AppConfig> {
     ensure_dirs()?;
     let path = config_path();
+    // Migrate legacy omarcal config if new doesn't exist
+    if !path.exists() {
+        let legacy = legacy_config_path();
+        if legacy.exists() {
+            let _ = fs::create_dir_all(config_dir());
+            let _ = fs::copy(&legacy, &path);
+            // keep legacy as fallback; don't delete
+        }
+    }
     if !path.exists() {
         let cfg = AppConfig::default();
         save_config(&cfg)?;
@@ -84,6 +107,12 @@ pub fn load_config() -> anyhow::Result<AppConfig> {
 pub fn save_config(cfg: &AppConfig) -> anyhow::Result<()> {
     ensure_dirs()?;
     let text = toml::to_string_pretty(cfg)?;
-    fs::write(config_path(), text)?;
+    let path = config_path();
+    fs::write(&path, text)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
     Ok(())
 }

@@ -13,21 +13,31 @@ type Props = {
   onSave: (input: EventInput) => Promise<void>;
 };
 
-export function EventEditor({ draft, calendars, timezone, title, isRecurringInstance, onClose, onSave }: Props) {
+export function EventEditor({
+  draft,
+  calendars,
+  timezone,
+  title,
+  isRecurringInstance,
+  onClose,
+  onSave,
+}: Props) {
   const [summary, setSummary] = useState(draft.summary || "");
   const [description, setDescription] = useState(draft.description || "");
   const [location, setLocation] = useState(draft.location || "");
   const writable = calendars.filter((c) => !c.readonly && c.subscribed !== false);
   const [calendarId, setCalendarId] = useState(
-    draft.calendar_id || writable[0]?.id || calendars[0]?.id,
+    draft.calendar_id || writable[0]?.id || calendars[0]?.id
   );
   const [allDay, setAllDay] = useState(!!draft.all_day);
-  const [dtstart, setDtstart] = useState(toLocalInput(draft.dtstart || "", !!draft.all_day, timezone));
+  const [dtstart, setDtstart] = useState(
+    toLocalInput(draft.dtstart || "", !!draft.all_day, timezone)
+  );
   const [dtend, setDtend] = useState(toLocalInput(draft.dtend || "", !!draft.all_day, timezone));
   const [rrule, setRrule] = useState<string | null>(draft.rrule || null);
   const [alarm, setAlarm] = useState(draft.alarms?.[0]?.trigger || "-PT15M");
   const [attendees, setAttendees] = useState(
-    (draft.attendees || []).map((a) => a.email).join(", "),
+    (draft.attendees || []).map((a) => a.email).join(", ")
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -74,15 +84,22 @@ export function EventEditor({ draft, calendars, timezone, title, isRecurringInst
 
   return (
     <div className="drawer-backdrop" onClick={onClose}>
-      <form
-        className="drawer"
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={submit}
-      >
+      <form className="drawer" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h2>{title ?? (draft.uid ? "Edit event" : "New event")}</h2>
         {isRecurringInstance && draft.rrule && (
-          <div className="muted" style={{ fontSize: "0.75rem", border: "1px solid var(--border)", borderRadius: 6, padding: "0.45rem 0.55rem", background: "color-mix(in srgb, var(--accent) 6%, var(--bg))" }}>
-            This is one occurrence of a repeating event. Changes here will affect the <strong>entire series</strong>. To change only this day, delete this occurrence and create a new single event.
+          <div
+            className="muted"
+            style={{
+              fontSize: "0.75rem",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              padding: "0.45rem 0.55rem",
+              background: "color-mix(in srgb, var(--accent) 6%, var(--bg))",
+            }}
+          >
+            This is one occurrence of a repeating event. Changes here will affect the{" "}
+            <strong>entire series</strong>. To change only this day, delete this occurrence and
+            create a new single event.
           </div>
         )}
         <div className="form-grid">
@@ -97,23 +114,16 @@ export function EventEditor({ draft, calendars, timezone, title, isRecurringInst
           </label>
           <label>
             Calendar
-            <select
-              value={calendarId}
-              onChange={(e) => setCalendarId(Number(e.target.value))}
-            >
+            <select value={calendarId} onChange={(e) => setCalendarId(Number(e.target.value))}>
               {writable.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.displayname}
-                  </option>
-                ))}
+                <option key={c.id} value={c.id}>
+                  {c.displayname}
+                </option>
+              ))}
             </select>
           </label>
           <label className="cal-row" style={{ textTransform: "none" }}>
-            <input
-              type="checkbox"
-              checked={allDay}
-              onChange={(e) => setAllDay(e.target.checked)}
-            />
+            <input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} />
             All day
           </label>
           <div className="form-row">
@@ -148,7 +158,13 @@ export function EventEditor({ draft, calendars, timezone, title, isRecurringInst
               onChange={(e) => setDescription(e.target.value)}
             />
           </label>
-          <RepeatBuilder rrule={rrule} dtstart={dtstart} allDay={allDay} timezone={timezone} onChange={setRrule} />
+          <RepeatBuilder
+            rrule={rrule}
+            dtstart={dtstart}
+            allDay={allDay}
+            timezone={timezone}
+            onChange={setRrule}
+          />
           <label>
             Reminder
             <select value={alarm} onChange={(e) => setAlarm(e.target.value)}>

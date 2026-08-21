@@ -1,10 +1,10 @@
-# AGENTS.md — Omarcal
+# AGENTS.md — Omacal
 
 Guidance for AI agents and humans working on this repository.
 
 ## What this is
 
-**Omarcal** is a Linux-first (Omarchy / Arch / Hyprland) desktop calendar:
+**Omacal** is a Linux-first (Omarchy / Arch / Hyprland) desktop calendar:
 
 - Tauri 2 + React + TypeScript UI (Apple Calendar–inspired)
 - Native **Nextcloud CalDAV** sync (not vdirsyncer, not Evolution Data Server)
@@ -26,7 +26,7 @@ Do not implement unless explicitly asked:
 ## Repository layout
 
 ```
-omarcal/
+omacal/
   src/                      # React + TS frontend
     App.tsx                 # FullCalendar shell, shortcuts, sync/UI wiring
     store.ts                # Zustand + Tauri invoke helpers
@@ -46,19 +46,19 @@ omarcal/
       sync.rs               # Sync orchestration
       db.rs                 # SQLite schema + queries
       ics.rs                # iCalendar parse/build/RRULE/alarms/PARTSTAT
-      config.rs             # ~/.config/omarcal/config.toml
-      secrets.rs            # keyring (service: omarcal)
+      config.rs             # ~/.config/omacal/config.toml
+      secrets.rs            # keyring (service: omacal)
       theme.rs              # Omarchy colors.toml watcher
       alarms.rs             # Desktop notification loop (notify-rust / Mako)
     tauri.conf.json
     Cargo.toml              # MUST keep custom-protocol feature (see below)
   packaging/
     install.sh              # Local install to ~/.local/bin
-    omarchy-omarcal         # Floating Hyprland launcher
-    omarcal-waybar          # Waybar custom module script
-    omarcal.desktop
-    hypr/omarcal.conf
-    systemd/omarcal-daemon.service
+    omarchy-omacal         # Floating Hyprland launcher
+    omacal-waybar          # Waybar custom module script
+    omacal.desktop
+    hypr/omacal.conf
+    systemd/omacal-daemon.service
   README.md
 ```
 
@@ -66,11 +66,11 @@ omarcal/
 
 | Kind | Path |
 |---|---|
-| Config | `~/.config/omarcal/config.toml` |
-| DB | `~/.local/share/omarcal/omarcal.db` |
-| Secrets | keyring service `omarcal`, key `account:{id}:password` |
-| Omarchy theme | `~/.config/omarchy/current/theme/colors.toml` (+ `theme.name`, optional `light.mode`) |
-| Installed binary | `~/.local/bin/omarcal` |
+| Config | `~/.config/omacal/config.toml` |
+| DB | `~/.local/share/omacal/omacal.db` |
+| Secrets | keyring service `omacal`, key `account:{id}:password` |
+| Omarchy theme | `~/.local/state/omarchy/current/theme/colors.toml` (+ `theme.name`, `mode = "dark"\|"light"`). Legacy fallback: `~/.config/omarchy/current/theme/colors.toml` (+ `light.mode` file) |
+| Installed binary | `~/.local/bin/omacal` |
 
 Config holds account URL/username/addresses only — **never** passwords.
 
@@ -90,7 +90,7 @@ Background threads (from `lib.rs` setup):
 1. Theme watcher → emits `theme-changed`
 2. Alarm loop → `notify-rust` + emits `alarm-fired`
 3. Interval sync → `sync_all` + emits `sync-finished`
-4. Tray (show / sync now / quit); `OMARCAL_START_HIDDEN=1` hides window on start
+4. Tray (show / sync now / quit); `OMACAL_START_HIDDEN=1` hides window on start
 
 Frontend listens via `@tauri-apps/api/event` in `store.ts` (`bootListeners`).
 
@@ -123,15 +123,20 @@ custom-protocol = ["tauri/custom-protocol"]
 
 - Prefer `--bundles deb` (AppImage/`linuxdeploy` has failed in this environment).
 - After backend changes: `npx tauri build --bundles deb` then  
-  `install -Dm755 src-tauri/target/release/omarcal ~/.local/bin/omarcal`
-- Fully quit old instance (including tray) before testing: `pkill -x omarcal`
+  `install -Dm755 src-tauri/target/release/omacal ~/.local/bin/omacal`
+- Fully quit old instance (including tray) before testing: `pkill -x omacal`
 
 ### Useful checks
 
 ```bash
 cd src-tauri && cargo test --lib caldav::tests
 cd src-tauri && cargo check
-npm run build            # tsc + vite only
+cd src-tauri && cargo clippy -- -D warnings
+cd src-tauri && cargo fmt -- --check
+npm run lint              # eslint (flat config) — must exit 0
+npm run format:check      # prettier
+npm run typecheck         # tsc --noEmit
+npm run build             # tsc + vite only
 ```
 
 ## Tauri commands (IPC)
@@ -180,7 +185,7 @@ v1 = CalDAV scheduling / `PARTSTAT=NEEDS-ACTION` on events matching account `add
 
 ### Dual sync warning
 
-Omarcal owns sync. Running **vdirsyncer** on the same calendars causes races. Document in UX/README; don’t re-enable dual-write.
+Omacal owns sync. Running **vdirsyncer** on the same calendars causes races. Document in UX/README; don’t re-enable dual-write.
 
 ## Data model (SQLite)
 
@@ -218,13 +223,13 @@ Recurrence: expand with `rrule` crate for UI/alarms (`build_events` / `alarms.rs
 
 | Artifact | Role |
 |---|---|
-| `packaging/omarchy-omarcal` | Float + size + focus Hyprland window |
-| `packaging/hypr/omarcal.conf` | Window rules snippet |
-| `packaging/omarcal-waybar` | JSON for Waybar next-event module (reads SQLite) |
-| `packaging/systemd/omarcal-daemon.service` | Keep app/tray alive (`OMARCAL_START_HIDDEN=1`) |
-| `packaging/omarcal.desktop` | Walker / app menu |
+| `packaging/omarchy-omacal` | Float + size + focus Hyprland window |
+| `packaging/hypr/omacal.conf` | Window rules snippet |
+| `packaging/omacal-waybar` | JSON for Waybar next-event module (reads SQLite) |
+| `packaging/systemd/omacal-daemon.service` | Keep app/tray alive (`OMACAL_START_HIDDEN=1`) |
+| `packaging/omacal.desktop` | Walker / app menu |
 
-Theme load: parse TOML keys `accent`, `foreground`, `background`, `cursor`, `selection_*`, `color0`–`color15`.
+Theme load (`theme.rs`): reads `~/.local/state/omarchy/current/theme/colors.toml` (fallback legacy `~/.config/...`), parses semantic keys `accent`, `foreground`, `background`, `selection`, `muted`, `red`–`magenta`, `bright_*`, `mode` (light/dark), derives an xterm `color0`–`color15` palette, and watches the dir + parent for atomic theme swap → emits `theme-changed`. Legacy `color0`–`color15`, `cursor`, `selection_foreground/background`, `light.mode` still supported.
 
 ## Locale defaults
 
@@ -244,7 +249,7 @@ Match existing user prefs unless told otherwise:
 
 1. Prefer extending existing modules (`caldav.rs`, `ics.rs`, `commands.rs`, React components) over new frameworks.
 2. After CalDAV/XML changes: add/adjust unit tests with realistic Nextcloud XML (prefixed + Empty tags).
-3. After Rust changes meant for the installed app: **tauri build + install** to `~/.local/bin/omarcal`, then ask user to fully restart.
+3. After Rust changes meant for the installed app: **tauri build + install** to `~/.local/bin/omacal`, then ask user to fully restart.
 4. Keep IPC surface stable; update `store.ts` when command payloads change.
 5. Don’t expand scope into non-goals without an explicit request.
 6. Don’t edit plan files under `.cursor/plans/` unless asked.
@@ -261,7 +266,7 @@ Match existing user prefs unless told otherwise:
 | Times wrong when OS tz ≠ `config.locale.timezone` | Frontend now config-driven via `timeZone` + Luxon; check sidebar shows `· system <Zone>` when mismatched |
 | Sync races / duplicate edits | vdirsyncer still running against same calendars |
 | Theme doesn’t update | Watcher not seeing Omarchy theme symlink swap; check `theme.rs` paths |
-| Alarms missing when window closed | Need tray/daemon (`omarcal-daemon.service` or keep tray running) |
+| Alarms missing when window closed | Need tray/daemon (`omacal-daemon.service` or keep tray running) |
 
 ## Quick file index for common tasks
 

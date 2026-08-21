@@ -23,8 +23,7 @@ fn ics_arg_from(args: &[String]) -> Option<String> {
     args.iter()
         .find(|a| {
             let lower = a.to_lowercase();
-            (lower.ends_with(".ics") || lower.ends_with(".ical"))
-                && Path::new(a).is_file()
+            (lower.ends_with(".ics") || lower.ends_with(".ical")) && Path::new(a).is_file()
         })
         .cloned()
 }
@@ -53,13 +52,7 @@ pub fn run() {
 
     let db = Arc::new(Db::open(&config::db_path()).expect("open db"));
     // Repair mis-parsed VTIMEZONE RRULEs / PARTSTAT before first UI snapshot
-    if db
-        .get_meta("ics_vevent_parse_v1")
-        .ok()
-        .flatten()
-        .as_deref()
-        != Some("1")
-    {
+    if db.get_meta("ics_vevent_parse_v1").ok().flatten().as_deref() != Some("1") {
         if let Ok(cfg) = config::load_config() {
             let mut addrs = std::collections::HashMap::new();
             for a in &cfg.accounts {
@@ -88,7 +81,7 @@ pub fn run() {
             tauri_plugin_single_instance::Builder::default()
                 .callback(|app, args, _cwd| {
                     if let Some(path) = ics_arg_from(&args) {
-                        queue_import(&app, &path);
+                        queue_import(app, &path);
                     }
                 })
                 .build(),
@@ -154,13 +147,16 @@ pub fn run() {
             });
 
             // tray menu
-            if std::env::var("OMARCAL_START_HIDDEN").ok().as_deref() == Some("1") {
+            let start_hidden = std::env::var("OMACAL_START_HIDDEN")
+                .or_else(|_| std::env::var("OMARCAL_START_HIDDEN"))
+                .ok();
+            if start_hidden.as_deref() == Some("1") {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.hide();
                 }
             }
 
-            let show_i = MenuItem::with_id(app, "show", "Show Omarcal", true, None::<&str>)?;
+            let show_i = MenuItem::with_id(app, "show", "Show Omacal", true, None::<&str>)?;
             let sync_i = MenuItem::with_id(app, "sync", "Sync now", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &sync_i, &quit_i])?;
@@ -168,7 +164,7 @@ pub fn run() {
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
-                .tooltip("Omarcal")
+                .tooltip("Omacal")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => app.exit(0),
                     "show" => {
@@ -209,5 +205,5 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running Omarcal");
+        .expect("error while running Omacal");
 }

@@ -34,7 +34,7 @@ pub struct RemoteObject {
 impl CalDavClient {
     pub fn new(base_url: &str, username: &str, password: &str) -> Result<Self> {
         let http = reqwest::Client::builder()
-            .user_agent("Omarcal/0.1")
+            .user_agent("Omacal/0.1")
             .redirect(reqwest::redirect::Policy::limited(10))
             .build()?;
         Ok(Self {
@@ -84,7 +84,10 @@ impl CalDavClient {
         use reqwest::header::HeaderName;
         let mut headers = self.auth_headers();
         for (k, v) in extra {
-            headers.insert(HeaderName::from_bytes(k.as_bytes())?, HeaderValue::from_str(v)?);
+            headers.insert(
+                HeaderName::from_bytes(k.as_bytes())?,
+                HeaderValue::from_str(v)?,
+            );
         }
         let mut builder = self.http.request(method, url).headers(headers);
         if let Some(b) = body {
@@ -153,7 +156,9 @@ impl CalDavClient {
                 truncate(&text, 320)
             );
         }
-        Err(anyhow!("no current-user-principal in response ({last_err})"))
+        Err(anyhow!(
+            "no current-user-principal in response ({last_err})"
+        ))
     }
 
     pub async fn discover_calendar_home(&self, principal: &str) -> Result<String> {
@@ -591,7 +596,12 @@ mod tests {
  </d:response>
 </d:multistatus>"#;
         let cals = parse_calendar_list(xml);
-        assert_eq!(cals.len(), 2, "got: {:?}", cals.iter().map(|c| &c.displayname).collect::<Vec<_>>());
+        assert_eq!(
+            cals.len(),
+            2,
+            "got: {:?}",
+            cals.iter().map(|c| &c.displayname).collect::<Vec<_>>()
+        );
         assert_eq!(cals[0].displayname, "Personal");
         assert_eq!(cals[1].displayname, "Work");
         assert_eq!(cals[0].color.as_deref(), Some("#FF0000"));
@@ -676,21 +686,21 @@ fn parse_calendar_list(xml: &str) -> Vec<RemoteCalendar> {
     let mut href_count = 0;
 
     let on_tag = |n: &str,
-                      in_response: &mut bool,
-                      in_resourcetype: &mut bool,
-                      in_priv: &mut bool,
-                      in_comp_set: &mut bool,
-                      is_calendar: &mut bool,
-                      is_collection: &mut bool,
-                      has_write: &mut bool,
-                      href: &mut String,
-                      displayname: &mut String,
-                      color: &mut Option<String>,
-                      ctag: &mut Option<String>,
-                      sync_token: &mut Option<String>,
-                      readonly: &mut bool,
-                      has_vevent: &mut bool,
-                      href_count: &mut i32| {
+                  in_response: &mut bool,
+                  in_resourcetype: &mut bool,
+                  in_priv: &mut bool,
+                  in_comp_set: &mut bool,
+                  is_calendar: &mut bool,
+                  is_collection: &mut bool,
+                  has_write: &mut bool,
+                  href: &mut String,
+                  displayname: &mut String,
+                  color: &mut Option<String>,
+                  ctag: &mut Option<String>,
+                  sync_token: &mut Option<String>,
+                  readonly: &mut bool,
+                  has_vevent: &mut bool,
+                  href_count: &mut i32| {
         match n {
             "response" => {
                 *in_response = true;

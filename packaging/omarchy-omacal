@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Launch Omacal as a floating Hyprland window (Omarchy-style).
+set -euo pipefail
+
+APP="${OMACAL_BIN:-omacal}"
+
+# If already running, focus it
+if hyprctl clients -j 2>/dev/null | jq -e '.[] | select(.class == "omacal")' >/dev/null 2>&1; then
+  hyprctl dispatch focuswindow "class:omacal"
+  exit 0
+elif hyprctl clients -j 2>/dev/null | grep -q '"class": "omacal"'; then
+  hyprctl dispatch focuswindow "class:omacal"
+  exit 0
+fi
+
+# Temporary window rule for next launch
+hyprctl keyword windowrulev2 "float, class:^(omacal)$" 2>/dev/null || true
+hyprctl keyword windowrulev2 "size 1280 800, class:^(omacal)$" 2>/dev/null || true
+hyprctl keyword windowrulev2 "center, class:^(omacal)$" 2>/dev/null || true
+
+exec "$APP" "$@"

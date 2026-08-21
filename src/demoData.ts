@@ -12,8 +12,7 @@ import type { AppConfig, Calendar, CalEvent, ThemeColors } from "./store";
 export function isTauri(): boolean {
   return (
     typeof window !== "undefined" &&
-    typeof (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ !==
-      "undefined"
+    typeof (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ !== "undefined"
   );
 }
 
@@ -25,33 +24,34 @@ function localDateKey(d: Date): string {
 
 function demoColors(): ThemeColors {
   const colors = [
-    "#0b0c16", // color0
-    "#1b2430",
-    "#26303d",
-    "#3a4a5f",
-    "#82fb9c",
-    "#6cc4ff",
-    "#ffb86b",
-    "#ff6b7a",
-    "#ff8fb1",
-    "#c792ea",
-    "#00c8b0",
-    "#f2f2f2",
-    "#58a6ff",
-    "#ddf7ff",
-    "#7ee787",
-    "#ffa657",
+    "#2e3440", // color0 background
+    "#bf616a", // color1 red
+    "#a3be8c", // color2 green
+    "#ebcb8b", // color3 yellow
+    "#81a1c1", // color4 blue/accent
+    "#b48ead", // color5 magenta
+    "#88c0d0", // color6 cyan
+    "#d8dee9", // color7 foreground
+    "#4c566a", // color8 muted
+    "#bf616a", // color9 bright red
+    "#a3be8c", // color10 bright green
+    "#ebcb8b", // color11 bright yellow
+    "#81a1c1", // color12 bright blue
+    "#b48ead", // color13 bright magenta
+    "#8fbcbb", // color14 bright cyan
+    "#d8dee9", // color15 bright foreground
   ];
   return {
-    accent: "#82fb9c",
-    foreground: "#ddf7ff",
-    background: "#0b0c16",
-    cursor: "#ddf7ff",
-    selection_foreground: "#0b0c16",
-    selection_background: "#ddf7ff",
+    accent: "#81a1c1",
+    foreground: "#d8dee9",
+    background: "#2e3440",
+    cursor: "#d8dee9",
+    selection_foreground: "#2e3440",
+    selection_background: "#434c5e",
+    muted: "#4c566a",
     colors,
     light: false,
-    name: "omarchy",
+    name: "nord",
   };
 }
 
@@ -66,10 +66,50 @@ export function buildMockSnapshot(): {
   default_calendar_id: number;
 } {
   const calendars: Calendar[] = [
-    { id: 1, account_id: "demo", href: "/demo/personal/", displayname: "Personal", color: "#82fb9c", visible: true, readonly: false, subscribed: true, sort_order: 0 },
-    { id: 2, account_id: "demo", href: "/demo/work/", displayname: "Work", color: "#6cc4ff", visible: true, readonly: false, subscribed: true, sort_order: 1 },
-    { id: 3, account_id: "demo", href: "/demo/family/", displayname: "Family", color: "#ffb86b", visible: true, readonly: false, subscribed: true, sort_order: 2 },
-    { id: 4, account_id: "demo", href: "/demo/archive/", displayname: "Archive", color: "#8b949e", visible: false, readonly: true, subscribed: true, sort_order: 3 },
+    {
+      id: 1,
+      account_id: "demo",
+      href: "/demo/personal/",
+      displayname: "Personal",
+      color: "#82fb9c",
+      visible: true,
+      readonly: false,
+      subscribed: true,
+      sort_order: 0,
+    },
+    {
+      id: 2,
+      account_id: "demo",
+      href: "/demo/work/",
+      displayname: "Work",
+      color: "#6cc4ff",
+      visible: true,
+      readonly: false,
+      subscribed: true,
+      sort_order: 1,
+    },
+    {
+      id: 3,
+      account_id: "demo",
+      href: "/demo/family/",
+      displayname: "Family",
+      color: "#ffb86b",
+      visible: true,
+      readonly: false,
+      subscribed: true,
+      sort_order: 2,
+    },
+    {
+      id: 4,
+      account_id: "demo",
+      href: "/demo/archive/",
+      displayname: "Archive",
+      color: "#8b949e",
+      visible: false,
+      readonly: true,
+      subscribed: true,
+      sort_order: 3,
+    },
   ];
 
   const now = new Date();
@@ -85,7 +125,7 @@ export function buildMockSnapshot(): {
     title: string,
     start: Date,
     end: Date | null,
-    opts: { all_day?: boolean; description?: string; location?: string } = {},
+    opts: { all_day?: boolean; description?: string; location?: string } = {}
   ): CalEvent {
     uid += 1;
     return {
@@ -123,10 +163,16 @@ export function buildMockSnapshot(): {
     // Midnight-crossing timed event (ends 07:00 next day, no reason to break).
     ev(3, "SUP med november", D(5, 22, 0), D(6, 7, 0)),
     // Multi-day project week covering "today" if it falls in this month.
-    ev(1, "Planeringsvecka", D(10, 12), D(15, 12), { all_day: true, description: "Årlig planeringsvecka" }),
+    ev(1, "Planeringsvecka", D(10, 12), D(15, 12), {
+      all_day: true,
+      description: "Årlig planeringsvecka",
+    }),
     ev(2, "Daglig planering", D(10, 9, 0), D(10, 9, 30)),
     // All-day trip across a single week (Tue–Thu).
-    ev(3, "Svensjöl – Blekinge", D(18, 12), D(21, 12), { all_day: true, description: "Family trip" }),
+    ev(3, "Svensjöl – Blekinge", D(18, 12), D(21, 12), {
+      all_day: true,
+      description: "Family trip",
+    }),
     // All-day crossing Sunday -> Monday (weekday-agnostic by month).
     ev(3, "Helgresa", D(22, 12), D(25, 12), { all_day: true }),
     // All-day crossing the month boundary.
@@ -219,6 +265,6 @@ export async function mockInvoke<T>(cmd: string, args?: unknown): Promise<T> {
 function searchMockEvents(query: string): CalEvent[] {
   const q = query.toLowerCase();
   return snapshot.events.filter((e) =>
-    [e.title, e.description, e.location].some((s) => s.toLowerCase().includes(q)),
+    [e.title, e.description, e.location].some((s) => s.toLowerCase().includes(q))
   );
 }

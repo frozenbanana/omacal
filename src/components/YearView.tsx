@@ -65,11 +65,12 @@ function MiniMonth({
     const weeks: Date[][] = [];
     for (let i = 0; i < 42; i += 7) weeks.push(dates.slice(i, i + 7));
     return { dates, weeks };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month, year, weekStartsOn]);
 
   const todayKey = dayKey(today);
-  const title = new Intl.DateTimeFormat("en-US", { month: "long" }).format(new Date(year, month, 1));
+  const title = new Intl.DateTimeFormat("en-US", { month: "long" }).format(
+    new Date(year, month, 1)
+  );
   const monthStart = new Date(year, month, 1);
 
   return (
@@ -97,7 +98,9 @@ function MiniMonth({
               {week.map((date) => {
                 const inMonth = date.getMonth() === month && date.getFullYear() === year;
                 if (!inMonth) {
-                  return <div key={dayKey(date)} className="mm-cell mm-cell-out" aria-hidden="true" />;
+                  return (
+                    <div key={dayKey(date)} className="mm-cell mm-cell-out" aria-hidden="true" />
+                  );
                 }
                 const key = dayKey(date);
                 const { count, colors } = eventDensityForDate(events, date);

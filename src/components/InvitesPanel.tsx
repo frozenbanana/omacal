@@ -1,10 +1,5 @@
 import { useMemo, useState, type MouseEvent } from "react";
-import {
-  respondInvite,
-  respondInvitesBulk,
-  useApp,
-  type CalEvent,
-} from "../store";
+import { respondInvite, respondInvitesBulk, useApp, type CalEvent } from "../store";
 
 type Filter = "upcoming" | "past" | "all";
 
@@ -34,8 +29,7 @@ export function InvitesPanel() {
       if (isPastInvite(p, now)) past.push(p);
       else upcoming.push(p);
     }
-    const filtered =
-      filter === "upcoming" ? upcoming : filter === "past" ? past : pending;
+    const filtered = filter === "upcoming" ? upcoming : filter === "past" ? past : pending;
     return { upcoming, past, filtered };
   }, [pending, now, filter]);
 
@@ -83,13 +77,9 @@ export function InvitesPanel() {
   async function bulk(partstat: string, ids: number[]) {
     if (ids.length === 0) return;
     const label =
-      partstat === "ACCEPTED"
-        ? "accept"
-        : partstat === "DECLINED"
-          ? "decline"
-          : "maybe";
+      partstat === "ACCEPTED" ? "accept" : partstat === "DECLINED" ? "decline" : "maybe";
     const ok = window.confirm(
-      `${label[0].toUpperCase()}${label.slice(1)} ${ids.length} invite(s)? This updates them on the server.`,
+      `${label[0].toUpperCase()}${label.slice(1)} ${ids.length} invite(s)? This updates them on the server.`
     );
     if (!ok) return;
     setBusy(true);
@@ -99,7 +89,7 @@ export function InvitesPanel() {
       setStatus(
         result.failed > 0
           ? `Done: ${result.ok} ok, ${result.failed} failed`
-          : `Updated ${result.ok}`,
+          : `Updated ${result.ok}`
       );
       setSelected(new Set());
       await load();
@@ -110,9 +100,7 @@ export function InvitesPanel() {
     }
   }
 
-  const selectedIds = filtered
-    .map((p) => p.id)
-    .filter((id) => selected.has(id));
+  const selectedIds = filtered.map((p) => p.id).filter((id) => selected.has(id));
 
   return (
     <div className="sidebar-section invites-panel">
@@ -127,9 +115,7 @@ export function InvitesPanel() {
           Invites <span className="badge">{pending.length}</span>
         </h2>
         {!expanded && upcoming.length > 0 && (
-          <span className="muted invites-summary">
-            {upcoming.length} upcoming
-          </span>
+          <span className="muted invites-summary">{upcoming.length} upcoming</span>
         )}
       </button>
 
@@ -179,7 +165,12 @@ export function InvitesPanel() {
                 type="button"
                 className="danger"
                 disabled={busy}
-                onClick={() => bulk("DECLINED", past.map((p) => p.id))}
+                onClick={() =>
+                  bulk(
+                    "DECLINED",
+                    past.map((p) => p.id)
+                  )
+                }
               >
                 Decline all past
               </button>
@@ -197,11 +188,7 @@ export function InvitesPanel() {
               >
                 Accept
               </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => bulk("TENTATIVE", selectedIds)}
-              >
+              <button type="button" disabled={busy} onClick={() => bulk("TENTATIVE", selectedIds)}>
                 Maybe
               </button>
               <button
@@ -218,9 +205,7 @@ export function InvitesPanel() {
           {status && <div className="muted invites-status">{status}</div>}
 
           <div className="invite-list">
-            {filtered.length === 0 && (
-              <p className="muted">No invites in this filter.</p>
-            )}
+            {filtered.length === 0 && <p className="muted">No invites in this filter.</p>}
             {filtered.map((p) => (
               <div key={p.id} className="invite-item">
                 <label className="invite-select">

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "henry.omacal",
+  "name": "Omacal — next event",
+  "version": "0.3.0",
+  "author": "Henry Bergstrom",
+  "description": "Shows the next upcoming calendar event from Omacal (Omarchy-native CalDAV). Polls the local SQLite store; click to open Omacal.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Omacal next event",
+    "description": "Next upcoming event from Omacal. Click to open the calendar.",
+    "category": "Office",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
