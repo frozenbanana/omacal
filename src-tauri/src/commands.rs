@@ -143,26 +143,26 @@ fn build_events(db: &Db, cfg: &AppConfig) -> Result<Vec<UiEvent>, String> {
     let events = db.list_events(true).map_err(|e| e.to_string())?;
     let range_start = chrono::Utc::now() - chrono::Duration::days(60);
     let range_end = chrono::Utc::now() + chrono::Duration::days(400);
+    let default_tz = cfg.locale.timezone.parse::<chrono_tz::Tz>().ok();
     let mut out = Vec::new();
     for e in events {
         let cal = map.get(&e.calendar_id).cloned();
-        let addresses = cal
-            .as_ref()
-            .and_then(|calendar| {
-                cfg.accounts
-                    .iter()
-                    .find(|account| account.id == calendar.account_id)
-            })
-            .map(|account| account.addresses.as_slice())
-            .unwrap_or(&[]);
-        let default_tz = cfg.locale.timezone.parse::<chrono_tz::Tz>().ok();
-        let overrides = ics::parse_recurrence_overrides_with_tz(&e.raw_ics, addresses, default_tz);
-        let override_map: std::collections::HashMap<String, ics::ParsedEvent> = overrides
-            .into_iter()
-            .map(|item| (item.recurrence_id, item.event))
-            .collect();
         let master = series_master(&e);
         if let (Some(rrule), Some(start)) = (e.rrule.clone(), e.dtstart.clone()) {
+            let addresses = cal
+                .as_ref()
+                .and_then(|calendar| {
+                    cfg.accounts
+                        .iter()
+                        .find(|account| account.id == calendar.account_id)
+                })
+                .map(|account| account.addresses.as_slice())
+                .unwrap_or(&[]);
+            let override_map: std::collections::HashMap<String, ics::ParsedEvent> =
+                ics::parse_recurrence_overrides_with_tz(&e.raw_ics, addresses, default_tz)
+                    .into_iter()
+                    .map(|item| (item.recurrence_id, item.event))
+                    .collect();
             if start.contains('T') {
                 let duration = match (&e.dtstart, &e.dtend) {
                     (Some(s), Some(en)) => {

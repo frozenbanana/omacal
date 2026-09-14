@@ -3,15 +3,37 @@ use crate::config::{AccountConfig, AppConfig};
 use crate::db::Db;
 use crate::ics;
 use crate::secrets;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 pub struct SyncEngine {
     pub db: Arc<Db>,
+    http: OnceLock<reqwest::Client>,
 }
 
 impl SyncEngine {
     pub fn new(db: Arc<Db>) -> Self {
-        Self { db }
+        Self {
+            db,
+            http: OnceLock::new(),
+        }
+    }
+
+    fn client_for(&self, account: &AccountConfig, password: &str) -> Result<CalDavClient, String> {
+        if self.http.get().is_none() {
+            let http = CalDavClient::build_http_client().map_err(|e| e.to_string())?;
+            let _ = self.http.set(http);
+        }
+        let http = self
+            .http
+            .get()
+            .expect("HTTP client initialized above")
+            .clone();
+        Ok(CalDavClient::with_http(
+            http,
+            &account.caldav_url,
+            &account.username,
+            password,
+        ))
     }
 
     pub async fn sync_all(&self, cfg: &AppConfig) -> Result<SyncReport, String> {
@@ -79,8 +101,7 @@ impl SyncEngine {
         cfg: &AppConfig,
     ) -> Result<SyncReport, String> {
         let password = secrets::get_password(&account.id)?;
-        let client = CalDavClient::new(&account.caldav_url, &account.username, &password)
-            .map_err(|e| e.to_string())?;
+        let client = self.client_for(account, &password)?;
 
         let principal = client
             .discover_principal()
@@ -189,8 +210,7 @@ impl SyncEngine {
         etag: Option<&str>,
     ) -> Result<Option<String>, String> {
         let password = secrets::get_password(&account.id)?;
-        let client = CalDavClient::new(&account.caldav_url, &account.username, &password)
-            .map_err(|e| e.to_string())?;
+        let client = self.client_for(account, &password)?;
         // Ensure href is under calendar
         let full_href = if href.starts_with('/') || href.starts_with("http") {
             href.to_string()
@@ -214,8 +234,7 @@ impl SyncEngine {
         etag: Option<&str>,
     ) -> Result<(), String> {
         let password = secrets::get_password(&account.id)?;
-        let client = CalDavClient::new(&account.caldav_url, &account.username, &password)
-            .map_err(|e| e.to_string())?;
+        let client = self.client_for(account, &password)?;
         client
             .delete_object(href, etag)
             .await

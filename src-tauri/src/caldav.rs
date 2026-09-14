@@ -33,16 +33,29 @@ pub struct RemoteObject {
 
 impl CalDavClient {
     pub fn new(base_url: &str, username: &str, password: &str) -> Result<Self> {
-        let http = reqwest::Client::builder()
+        let http = Self::build_http_client()?;
+        Ok(Self::with_http(http, base_url, username, password))
+    }
+
+    pub(crate) fn build_http_client() -> Result<reqwest::Client> {
+        Ok(reqwest::Client::builder()
             .user_agent("Omacal/0.1")
             .redirect(reqwest::redirect::Policy::limited(10))
-            .build()?;
-        Ok(Self {
+            .build()?)
+    }
+
+    pub(crate) fn with_http(
+        http: reqwest::Client,
+        base_url: &str,
+        username: &str,
+        password: &str,
+    ) -> Self {
+        Self {
             http,
             base_url: normalize_caldav_url(base_url),
             username: username.to_string(),
             password: password.to_string(),
-        })
+        }
     }
 
     fn auth_headers(&self) -> HeaderMap {
