@@ -8,7 +8,7 @@ type Props = {
   calendars: Calendar[];
   timezone: string;
   title?: string;
-  isRecurringInstance?: boolean;
+  recurrenceEditScope?: "single" | "series";
   onClose: () => void;
   onSave: (input: EventInput) => Promise<void>;
 };
@@ -18,7 +18,7 @@ export function EventEditor({
   calendars,
   timezone,
   title,
-  isRecurringInstance,
+  recurrenceEditScope,
   onClose,
   onSave,
 }: Props) {
@@ -34,7 +34,9 @@ export function EventEditor({
     toLocalInput(draft.dtstart || "", !!draft.all_day, timezone)
   );
   const [dtend, setDtend] = useState(toLocalInput(draft.dtend || "", !!draft.all_day, timezone));
-  const [rrule, setRrule] = useState<string | null>(draft.rrule || null);
+  const [rrule, setRrule] = useState<string | null>(
+    recurrenceEditScope === "single" ? null : draft.rrule || null
+  );
   const [alarm, setAlarm] = useState(draft.alarms?.[0]?.trigger || "-PT15M");
   const [attendees, setAttendees] = useState(
     (draft.attendees || []).map((a) => a.email).join(", ")
@@ -69,7 +71,7 @@ export function EventEditor({
         dtend: fromLocalInput(dtend, allDay),
         all_day: allDay,
         timezone,
-        rrule: rrule?.trim() || null,
+        rrule: recurrenceEditScope === "single" ? null : rrule?.trim() || null,
         alarms: alarm ? [{ trigger: alarm, description: "Reminder" }] : [],
         attendees: attendeeList,
         href: draft.href,
@@ -86,7 +88,7 @@ export function EventEditor({
     <div className="drawer-backdrop" onClick={onClose}>
       <form className="drawer" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h2>{title ?? (draft.uid ? "Edit event" : "New event")}</h2>
-        {isRecurringInstance && draft.rrule && (
+        {recurrenceEditScope && (
           <div
             className="muted"
             style={{
@@ -97,9 +99,17 @@ export function EventEditor({
               background: "color-mix(in srgb, var(--accent) 6%, var(--bg))",
             }}
           >
-            This is one occurrence of a repeating event. Changes here will affect the{" "}
-            <strong>entire series</strong>. To change only this day, delete this occurrence and
-            create a new single event.
+            {recurrenceEditScope === "single" ? (
+              <>
+                Changes here affect <strong>only this event</strong>. Other occurrences stay the
+                same.
+              </>
+            ) : (
+              <>
+                Changes here affect the <strong>entire series</strong>. Existing one-off edits stay
+                unchanged.
+              </>
+            )}
           </div>
         )}
         <div className="form-grid">
@@ -114,7 +124,11 @@ export function EventEditor({
           </label>
           <label>
             Calendar
-            <select value={calendarId} onChange={(e) => setCalendarId(Number(e.target.value))}>
+            <select
+              value={calendarId}
+              onChange={(e) => setCalendarId(Number(e.target.value))}
+              disabled={recurrenceEditScope === "single"}
+            >
               {writable.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.displayname}
@@ -158,13 +172,15 @@ export function EventEditor({
               onChange={(e) => setDescription(e.target.value)}
             />
           </label>
-          <RepeatBuilder
-            rrule={rrule}
-            dtstart={dtstart}
-            allDay={allDay}
-            timezone={timezone}
-            onChange={setRrule}
-          />
+          {recurrenceEditScope !== "single" && (
+            <RepeatBuilder
+              rrule={rrule}
+              dtstart={dtstart}
+              allDay={allDay}
+              timezone={timezone}
+              onChange={setRrule}
+            />
+          )}
           <label>
             Reminder
             <select value={alarm} onChange={(e) => setAlarm(e.target.value)}>

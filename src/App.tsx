@@ -24,6 +24,7 @@ import {
   previewIcs,
   respondInvite,
   saveEvent,
+  saveEventOccurrence,
   takePendingImports,
   useApp,
   type CalEvent,
@@ -44,6 +45,7 @@ import { InvitesPanel } from "./components/InvitesPanel";
 import { DayPopover, type DayPopoverAnchor } from "./components/DayPopover";
 import { YearView } from "./components/YearView";
 import { ConfirmRecurrenceDelete } from "./components/ConfirmRecurrenceDelete";
+import { ConfirmRecurrenceEdit } from "./components/ConfirmRecurrenceEdit";
 
 function isInvite(e: CalEvent): boolean {
   return e.my_partstat === "NEEDS-ACTION";
@@ -155,7 +157,9 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimer = useRef<number | null>(null);
   const [pendingDelete, setPendingDelete] = useState<CalEvent | null>(null);
-  const [editingInstance, setEditingInstance] = useState(false);
+  const [pendingRecurrenceEdit, setPendingRecurrenceEdit] = useState<CalEvent | null>(null);
+  const [recurrenceEditScope, setRecurrenceEditScope] = useState<"single" | "series">();
+  const [editingOccurrence, setEditingOccurrence] = useState<CalEvent | null>(null);
 
   function showNotice(msg: string) {
     setNotice(msg);
@@ -167,7 +171,7 @@ export default function App() {
     return !!ev.rrule;
   }
   function isInstance(ev: CalEvent): boolean {
-    return ev.uid.includes("::");
+    return !!ev.recurrence_id || ev.uid.includes("::");
   }
 
   function requestDelete(ev: CalEvent) {
@@ -199,7 +203,7 @@ export default function App() {
     const ev = pendingDelete;
     if (!ev) return;
     const id = ev.id;
-    const occurrence = ev.start || "";
+    const occurrence = ev.recurrence_id || ev.start || "";
     setPendingDelete(null);
     if (selected?.id === ev.id && selected.start === ev.start) setSelected(null);
     if (marked?.id === ev.id && marked.start === ev.start) setMarked(null);
@@ -615,7 +619,8 @@ export default function App() {
     const s = start || new Date();
     const e = end || new Date(s.getTime() + 60 * 60 * 1000);
     setEditorTitle(undefined);
-    setEditingInstance(false);
+    setRecurrenceEditScope(undefined);
+    setEditingOccurrence(null);
     const tz = config?.locale.timezone || "Europe/Stockholm";
     setEditorDraft({
       calendar_id: firstWritable.id,
@@ -632,32 +637,41 @@ export default function App() {
     setShowEditor(true);
   }
 
-  function openEdit(ev: CalEvent) {
+  function openEdit(ev: CalEvent, scope?: "single" | "series") {
     const baseUid = ev.uid.includes("::") ? ev.uid.split("::")[0] : ev.uid;
     const isInst = isInstance(ev);
     const isRec = isRecurring(ev);
-    setEditingInstance(isInst && isRec);
-    if (isRec && isInst) {
-      setEditorTitle("Edit recurring event — changes affect entire series");
-    } else {
-      setEditorTitle(undefined);
+    const canEditSingle = isRec && isInst && !!ev.recurrence_id;
+    if (canEditSingle && !scope) {
+      setPendingRecurrenceEdit(ev);
+      return;
     }
-    // For series edit, use master_start so DTSTART doesn't shift to occurrence date
-    const useMaster = isRec && ev.master_start;
+    const editScope = canEditSingle ? scope : undefined;
+    const master = editScope === "series" ? ev.series_master : undefined;
+    const useMaster = editScope === "series" && (master?.start || ev.master_start);
+    setRecurrenceEditScope(editScope);
+    setEditingOccurrence(editScope === "single" ? ev : null);
+    setEditorTitle(
+      editScope === "single"
+        ? "Edit this event"
+        : editScope === "series"
+          ? "Edit entire series"
+          : undefined
+    );
     setEditorDraft({
       id: ev.id,
       calendar_id: ev.calendar_id,
       uid: baseUid,
-      summary: ev.title,
-      description: ev.description,
-      location: ev.location,
-      dtstart: (useMaster ? ev.master_start : ev.start) || ev.start || "",
-      dtend: (useMaster ? ev.master_end : ev.end) || ev.end || ev.start || "",
-      all_day: ev.all_day,
+      summary: master?.summary ?? ev.title,
+      description: master?.description ?? ev.description,
+      location: master?.location ?? ev.location,
+      dtstart: (useMaster ? (master?.start ?? ev.master_start) : ev.start) || ev.start || "",
+      dtend: (useMaster ? (master?.end ?? ev.master_end) : ev.end) || ev.end || ev.start || "",
+      all_day: master?.all_day ?? ev.all_day,
       timezone: config?.locale.timezone || "Europe/Stockholm",
-      rrule: ev.rrule,
-      alarms: ev.alarms,
-      attendees: ev.attendees,
+      rrule: master?.rrule ?? ev.rrule,
+      alarms: master?.alarms ?? ev.alarms,
+      attendees: master?.attendees ?? ev.attendees,
       href: ev.href,
       etag: ev.etag,
     });
@@ -682,6 +696,8 @@ export default function App() {
       return;
     }
     setEditorTitle("Import event");
+    setRecurrenceEditScope(undefined);
+    setEditingOccurrence(null);
     setEditorDraft({
       calendar_id: target.id,
       // no uid: always create a fresh event on import
@@ -1157,10 +1173,18 @@ export default function App() {
           calendars={calendars.filter((c) => c.subscribed !== false)}
           timezone={config?.locale.timezone || "Europe/Stockholm"}
           title={editorTitle}
-          isRecurringInstance={editingInstance}
+          recurrenceEditScope={recurrenceEditScope}
           onClose={() => setShowEditor(false)}
           onSave={async (input) => {
-            await saveEvent(input);
+            if (recurrenceEditScope === "single" && editingOccurrence?.recurrence_id) {
+              await saveEventOccurrence(
+                editingOccurrence.id,
+                editingOccurrence.recurrence_id,
+                input
+              );
+            } else {
+              await saveEvent(input);
+            }
             setShowEditor(false);
             await load();
           }}
@@ -1177,6 +1201,23 @@ export default function App() {
           onDeleteSingle={() => doDeleteOccurrence("single")}
           onDeleteFuture={() => doDeleteOccurrence("future")}
           onDeleteSeries={() => doDeleteOccurrence("all")}
+        />
+      )}
+
+      {pendingRecurrenceEdit && (
+        <ConfirmRecurrenceEdit
+          title={pendingRecurrenceEdit.title}
+          onClose={() => setPendingRecurrenceEdit(null)}
+          onEditSingle={() => {
+            const event = pendingRecurrenceEdit;
+            setPendingRecurrenceEdit(null);
+            openEdit(event, "single");
+          }}
+          onEditSeries={() => {
+            const event = pendingRecurrenceEdit;
+            setPendingRecurrenceEdit(null);
+            openEdit(event, "series");
+          }}
         />
       )}
     </div>

@@ -1,6 +1,12 @@
 process.env.TZ = "Europe/Stockholm";
 import { describe, expect, it } from "vitest";
-import { useApp, bootListeners, takePendingImports, deleteEvent } from "./store";
+import {
+  useApp,
+  bootListeners,
+  takePendingImports,
+  deleteEvent,
+  saveEventOccurrence,
+} from "./store";
 import { isTauri } from "./demoData";
 
 // Minimal DOM so applyThemeToDom works; no __TAURI_INTERNALS__ (plain browser).
@@ -24,6 +30,21 @@ describe("browser preview fallback", () => {
   it("store actions route to the demo backend", async () => {
     await expect(takePendingImports()).resolves.toEqual([]);
     await expect(deleteEvent(999)).resolves.toBeUndefined();
+    await expect(
+      saveEventOccurrence(1, "2026-09-14T07:00:00+00:00", {
+        calendar_id: 1,
+        summary: "One occurrence",
+        description: "",
+        location: "",
+        dtstart: "2026-09-14T10:00:00",
+        dtend: "2026-09-14T11:00:00",
+        all_day: false,
+        timezone: "Europe/Stockholm",
+        rrule: null,
+        alarms: [],
+        attendees: [],
+      })
+    ).resolves.toBeUndefined();
   });
 
   it("load() populates demo data", async () => {

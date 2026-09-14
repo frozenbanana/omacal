@@ -58,6 +58,20 @@ export type CalEvent = {
   readonly: boolean;
   master_start?: string | null;
   master_end?: string | null;
+  recurrence_id?: string | null;
+  series_master?: SeriesMaster | null;
+};
+
+export type SeriesMaster = {
+  summary: string;
+  description: string;
+  location: string;
+  start?: string | null;
+  end?: string | null;
+  all_day: boolean;
+  rrule?: string | null;
+  attendees: Attendee[];
+  alarms: Alarm[];
 };
 
 export type Account = {
@@ -355,6 +369,16 @@ export async function bootListeners() {
 
 export async function saveEvent(input: EventInput) {
   return safeInvoke<CalEvent>("save_event", { input });
+}
+
+export async function saveEventOccurrence(
+  eventId: number,
+  recurrenceId: string,
+  input: EventInput
+) {
+  return safeInvoke<void>("save_event_occurrence", {
+    req: { event_id: eventId, recurrence_id: recurrenceId, input },
+  });
 }
 
 export async function previewIcs(path: string): Promise<ImportPreview> {

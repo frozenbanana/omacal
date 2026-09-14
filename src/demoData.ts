@@ -231,7 +231,9 @@ export async function mockInvoke<T>(cmd: string, args?: unknown): Promise<T> {
     case "set_calendar_subscribed":
     case "reorder_calendars":
     case "save_event":
+    case "save_event_occurrence":
     case "delete_event":
+    case "delete_event_occurrence":
     case "respond_invite":
     case "respond_invites_bulk":
       return undefined as unknown as T;

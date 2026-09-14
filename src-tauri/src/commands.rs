@@ -53,6 +53,23 @@ pub struct UiEvent {
     /// For expanded recurring occurrences, the master DTSTART (UTC RFC3339 or date). Used for editing series.
     pub master_start: Option<String>,
     pub master_end: Option<String>,
+    /// Original recurrence slot. Unlike `start`, this does not change when an instance is moved.
+    pub recurrence_id: Option<String>,
+    /// Editable master values used when the user chooses to edit the entire series.
+    pub series_master: Option<SeriesMaster>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeriesMaster {
+    pub summary: String,
+    pub description: String,
+    pub location: String,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub all_day: bool,
+    pub rrule: Option<String>,
+    pub attendees: Vec<AttendeeInfo>,
+    pub alarms: Vec<AlarmInfo>,
 }
 
 fn to_ui(ev: EventRow, cal: Option<&CalendarRow>) -> UiEvent {
@@ -83,10 +100,43 @@ fn to_ui(ev: EventRow, cal: Option<&CalendarRow>) -> UiEvent {
         readonly: cal.map(|c| c.readonly).unwrap_or(false),
         master_start: ev.dtstart,
         master_end: ev.dtend,
+        recurrence_id: None,
+        series_master: None,
     }
 }
 
-fn build_events(db: &Db) -> Result<Vec<UiEvent>, String> {
+fn series_master(ev: &EventRow) -> SeriesMaster {
+    SeriesMaster {
+        summary: ev.summary.clone(),
+        description: ev.description.clone(),
+        location: ev.location.clone(),
+        start: ev.dtstart.clone(),
+        end: ev.dtend.clone(),
+        all_day: ev.all_day,
+        rrule: ev.rrule.clone(),
+        attendees: serde_json::from_str(&ev.attendees_json).unwrap_or_default(),
+        alarms: serde_json::from_str(&ev.alarms_json).unwrap_or_default(),
+    }
+}
+
+fn row_with_override(master: &EventRow, event: &ics::ParsedEvent) -> EventRow {
+    EventRow {
+        summary: event.summary.clone(),
+        description: event.description.clone(),
+        location: event.location.clone(),
+        dtstart: event.dtstart.clone(),
+        dtend: event.dtend.clone(),
+        all_day: event.all_day,
+        status: event.status.clone(),
+        organizer: event.organizer.clone(),
+        attendees_json: serde_json::to_string(&event.attendees).unwrap_or_else(|_| "[]".into()),
+        alarms_json: serde_json::to_string(&event.alarms).unwrap_or_else(|_| "[]".into()),
+        my_partstat: event.my_partstat.clone(),
+        ..master.clone()
+    }
+}
+
+fn build_events(db: &Db, cfg: &AppConfig) -> Result<Vec<UiEvent>, String> {
     let calendars = db.list_calendars().map_err(|e| e.to_string())?;
     let map: std::collections::HashMap<i64, CalendarRow> =
         calendars.into_iter().map(|c| (c.id, c)).collect();
@@ -96,6 +146,22 @@ fn build_events(db: &Db) -> Result<Vec<UiEvent>, String> {
     let mut out = Vec::new();
     for e in events {
         let cal = map.get(&e.calendar_id).cloned();
+        let addresses = cal
+            .as_ref()
+            .and_then(|calendar| {
+                cfg.accounts
+                    .iter()
+                    .find(|account| account.id == calendar.account_id)
+            })
+            .map(|account| account.addresses.as_slice())
+            .unwrap_or(&[]);
+        let default_tz = cfg.locale.timezone.parse::<chrono_tz::Tz>().ok();
+        let overrides = ics::parse_recurrence_overrides_with_tz(&e.raw_ics, addresses, default_tz);
+        let override_map: std::collections::HashMap<String, ics::ParsedEvent> = overrides
+            .into_iter()
+            .map(|item| (item.recurrence_id, item.event))
+            .collect();
+        let master = series_master(&e);
         if let (Some(rrule), Some(start)) = (e.rrule.clone(), e.dtstart.clone()) {
             if start.contains('T') {
                 let duration = match (&e.dtstart, &e.dtend) {
@@ -118,20 +184,128 @@ fn build_events(db: &Db) -> Result<Vec<UiEvent>, String> {
                     range_end,
                 );
                 if !occurrences.is_empty() {
+                    let mut seen_overrides = std::collections::HashSet::new();
                     for occ in occurrences {
-                        let mut ui = to_ui(
-                            EventRow {
-                                dtstart: Some(occ.to_rfc3339()),
+                        let recurrence_id = occ.to_rfc3339();
+                        seen_overrides.insert(recurrence_id.clone());
+                        let occurrence_row = override_map
+                            .get(&recurrence_id)
+                            .map(|event| row_with_override(&e, event))
+                            .unwrap_or_else(|| EventRow {
+                                dtstart: Some(recurrence_id.clone()),
                                 dtend: Some((occ + duration).to_rfc3339()),
                                 ..e.clone()
-                            },
-                            cal.as_ref(),
-                        );
+                            });
+                        if occurrence_row.status.as_deref() == Some("CANCELLED") {
+                            continue;
+                        }
+                        let mut ui = to_ui(occurrence_row, cal.as_ref());
                         // keep master start/end for editing series
                         ui.master_start = e.dtstart.clone();
                         ui.master_end = e.dtend.clone();
+                        ui.recurrence_id = Some(recurrence_id);
+                        ui.series_master = Some(master.clone());
                         // unique id for FC: keep base id, encode occurrence in uid display
                         ui.uid = format!("{}::{}", e.uid, occ.timestamp());
+                        out.push(ui);
+                    }
+                    for (recurrence_id, event) in &override_map {
+                        if seen_overrides.contains(recurrence_id)
+                            || event.status.as_deref() == Some("CANCELLED")
+                        {
+                            continue;
+                        }
+                        let Some(display_start) = event
+                            .dtstart
+                            .as_deref()
+                            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                            .map(|value| value.with_timezone(&chrono::Utc))
+                        else {
+                            continue;
+                        };
+                        if display_start < range_start || display_start > range_end {
+                            continue;
+                        }
+                        let mut ui = to_ui(row_with_override(&e, event), cal.as_ref());
+                        ui.master_start = e.dtstart.clone();
+                        ui.master_end = e.dtend.clone();
+                        ui.recurrence_id = Some(recurrence_id.clone());
+                        ui.series_master = Some(master.clone());
+                        ui.uid = format!("{}::{}", e.uid, recurrence_id);
+                        out.push(ui);
+                    }
+                    continue;
+                }
+            } else if let Ok(start_date) = chrono::NaiveDate::parse_from_str(&start, "%Y-%m-%d") {
+                let duration_days = match (&e.dtstart, &e.dtend) {
+                    (Some(_), Some(end)) => chrono::NaiveDate::parse_from_str(end, "%Y-%m-%d")
+                        .ok()
+                        .map(|end| (end - start_date).num_days())
+                        .filter(|days| *days > 0)
+                        .unwrap_or(1),
+                    _ => 1,
+                };
+                let occurrences = ics::expand_all_day_from_raw(
+                    &e.raw_ics,
+                    &start,
+                    &rrule,
+                    range_start.date_naive(),
+                    range_end.date_naive(),
+                );
+                if !occurrences.is_empty() {
+                    let mut seen_overrides = std::collections::HashSet::new();
+                    for date in occurrences {
+                        let recurrence_id = date.format("%Y-%m-%d").to_string();
+                        seen_overrides.insert(recurrence_id.clone());
+                        let occurrence_row = override_map
+                            .get(&recurrence_id)
+                            .map(|event| row_with_override(&e, event))
+                            .unwrap_or_else(|| EventRow {
+                                dtstart: Some(recurrence_id.clone()),
+                                dtend: Some(
+                                    (date + chrono::Duration::days(duration_days))
+                                        .format("%Y-%m-%d")
+                                        .to_string(),
+                                ),
+                                ..e.clone()
+                            });
+                        if occurrence_row.status.as_deref() == Some("CANCELLED") {
+                            continue;
+                        }
+                        let mut ui = to_ui(occurrence_row, cal.as_ref());
+                        ui.master_start = e.dtstart.clone();
+                        ui.master_end = e.dtend.clone();
+                        ui.recurrence_id = Some(recurrence_id.clone());
+                        ui.series_master = Some(master.clone());
+                        ui.uid = format!("{}::{}", e.uid, recurrence_id);
+                        out.push(ui);
+                    }
+                    for (recurrence_id, event) in &override_map {
+                        if seen_overrides.contains(recurrence_id)
+                            || event.status.as_deref() == Some("CANCELLED")
+                        {
+                            continue;
+                        }
+                        let Some(display_date) = event.dtstart.as_deref().and_then(|value| {
+                            chrono::NaiveDate::parse_from_str(
+                                &value[..10.min(value.len())],
+                                "%Y-%m-%d",
+                            )
+                            .ok()
+                        }) else {
+                            continue;
+                        };
+                        if display_date < range_start.date_naive()
+                            || display_date > range_end.date_naive()
+                        {
+                            continue;
+                        }
+                        let mut ui = to_ui(row_with_override(&e, event), cal.as_ref());
+                        ui.master_start = e.dtstart.clone();
+                        ui.master_end = e.dtend.clone();
+                        ui.recurrence_id = Some(recurrence_id.clone());
+                        ui.series_master = Some(master.clone());
+                        ui.uid = format!("{}::{}", e.uid, recurrence_id);
                         out.push(ui);
                     }
                     continue;
@@ -162,7 +336,7 @@ pub fn save_config(cfg: AppConfig) -> Result<(), String> {
 pub fn get_snapshot(state: State<'_, AppState>) -> Result<AppSnapshot, String> {
     let cfg = config::load_config().map_err(|e| e.to_string())?;
     let calendars = state.db.list_calendars().map_err(|e| e.to_string())?;
-    let events = build_events(&state.db)?;
+    let events = build_events(&state.db, &cfg)?;
     let pending = {
         let cals: std::collections::HashMap<i64, CalendarRow> =
             calendars.iter().cloned().map(|c| (c.id, c)).collect();
@@ -392,7 +566,8 @@ pub fn reorder_calendars(
 
 #[tauri::command]
 pub fn list_events(state: State<'_, AppState>) -> Result<Vec<UiEvent>, String> {
-    build_events(&state.db)
+    let cfg = config::load_config().map_err(|e| e.to_string())?;
+    build_events(&state.db, &cfg)
 }
 
 #[tauri::command]
@@ -451,7 +626,12 @@ pub async fn save_event(state: State<'_, AppState>, input: EventInput) -> Result
         None
     };
 
-    let (uid, ics_body) = ics::build_ics(&input, existing.as_ref().map(|e| e.uid.as_str()))?;
+    let (uid, built_ics) = ics::build_ics(&input, existing.as_ref().map(|e| e.uid.as_str()))?;
+    let ics_body = if let Some(row) = &existing {
+        ics::replace_master_event(&row.raw_ics, &built_ics, input.rrule.is_some())?
+    } else {
+        built_ics
+    };
     let href = input
         .href
         .clone()
@@ -504,6 +684,83 @@ pub async fn save_event(state: State<'_, AppState>, input: EventInput) -> Result
         .or_else(|| state.db.get_object_by_uid(&uid).ok().flatten())
         .ok_or_else(|| "saved but not found locally".to_string())?;
     Ok(to_ui(row, Some(&cal)))
+}
+
+#[derive(Deserialize)]
+pub struct SaveOccurrenceRequest {
+    pub event_id: i64,
+    pub recurrence_id: String,
+    pub input: EventInput,
+}
+
+#[tauri::command]
+pub async fn save_event_occurrence(
+    state: State<'_, AppState>,
+    req: SaveOccurrenceRequest,
+) -> Result<(), String> {
+    let cfg = config::load_config().map_err(|e| e.to_string())?;
+    let row = state
+        .db
+        .get_object(req.event_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "event not found".to_string())?;
+    if row.rrule.is_none() {
+        return Err("event is not recurring".to_string());
+    }
+    if req.input.calendar_id != row.calendar_id {
+        return Err("a single occurrence cannot be moved to another calendar".to_string());
+    }
+    let cal = state
+        .db
+        .get_calendar(row.calendar_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "calendar not found".to_string())?;
+    if cal.readonly {
+        return Err("calendar is read-only".into());
+    }
+    let account = cfg
+        .accounts
+        .iter()
+        .find(|account| account.id == cal.account_id)
+        .ok_or_else(|| "account not found".to_string())?
+        .clone();
+    let default_tz = req.input.timezone.parse::<chrono_tz::Tz>().ok();
+    let new_raw =
+        ics::upsert_occurrence_override(&row.raw_ics, &req.recurrence_id, &req.input, default_tz)?;
+    let etag = req.input.etag.as_deref().or(row.etag.as_deref());
+    let new_etag = state
+        .sync
+        .push_event(&account, &cal.href, &row.href, &new_raw, etag)
+        .await?;
+
+    let parsed = ics::parse_ics_with_tz(&new_raw, &account.addresses, default_tz)
+        .or_else(|| ics::parse_ics(&new_raw, &account.addresses))
+        .ok_or_else(|| "failed to parse event after occurrence edit".to_string())?;
+    let attendees_json = serde_json::to_string(&parsed.attendees).unwrap_or_else(|_| "[]".into());
+    let alarms_json = serde_json::to_string(&parsed.alarms).unwrap_or_else(|_| "[]".into());
+    state
+        .db
+        .upsert_object(
+            cal.id,
+            &row.href,
+            new_etag.as_deref().or(etag),
+            &parsed.uid,
+            &parsed.summary,
+            &parsed.description,
+            &parsed.location,
+            parsed.dtstart.as_deref(),
+            parsed.dtend.as_deref(),
+            parsed.all_day,
+            parsed.rrule.as_deref(),
+            &new_raw,
+            parsed.status.as_deref(),
+            parsed.organizer.as_deref(),
+            &attendees_json,
+            &alarms_json,
+            parsed.my_partstat.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -628,12 +885,20 @@ pub async fn delete_event_occurrence(
         }
     };
 
+    let default_tz = cfg.locale.timezone.parse::<chrono_tz::Tz>().ok();
     let new_raw = match req.mode.as_str() {
         "single" => {
+            let without_override =
+                ics::remove_occurrence_override(&row.raw_ics, &req.occurrence_start, default_tz);
             // Detect DTSTART tz for EXDATE form
-            let dtstart_tz =
+            let detected_tz =
                 ics::extract_wall_dt_and_tz(&row.raw_ics, "DTSTART").and_then(|(_, tz, _)| tz);
-            ics::inject_exdate(&row.raw_ics, parsed_occ, dtstart_tz)
+            let dtstart_tz = if row.all_day {
+                detected_tz.or(default_tz)
+            } else {
+                detected_tz
+            };
+            ics::inject_exdate(&without_override, parsed_occ, dtstart_tz)
         }
         "future" => {
             // UNTIL = occurrence - 1s (excludes this and future)
@@ -644,15 +909,24 @@ pub async fn delete_event_occurrence(
                 .or_else(|| cfg.locale.timezone.parse::<chrono_tz::Tz>().ok());
             // For all-day we want date-only UNTIL (occurrence date -1)
             if row.all_day {
-                let until_date = (parsed_occ - chrono::Duration::days(1)).date_naive();
+                let occurrence_date = chrono::NaiveDate::parse_from_str(
+                    &req.occurrence_start[..10.min(req.occurrence_start.len())],
+                    "%Y-%m-%d",
+                )
+                .map_err(|_| format!("cannot parse occurrence date {}", req.occurrence_start))?;
+                let until_date = occurrence_date - chrono::Duration::days(1);
                 let until_wall = until_date.and_hms_opt(0, 0, 0).unwrap();
-                ics::truncate_rrule_until(&row.raw_ics, until_wall, None, true)
+                let truncated = ics::truncate_rrule_until(&row.raw_ics, until_wall, None, true);
+                ics::remove_future_overrides(&truncated, &req.occurrence_start, default_tz)
             } else if let Some(tz) = until_tz {
                 let until_wall = until_utc.with_timezone(&tz).naive_local();
-                ics::truncate_rrule_until(&row.raw_ics, until_wall, Some(tz), false)
+                let truncated =
+                    ics::truncate_rrule_until(&row.raw_ics, until_wall, Some(tz), false);
+                ics::remove_future_overrides(&truncated, &req.occurrence_start, default_tz)
             } else {
                 let until_wall = until_utc.naive_utc();
-                ics::truncate_rrule_until(&row.raw_ics, until_wall, None, false)
+                let truncated = ics::truncate_rrule_until(&row.raw_ics, until_wall, None, false);
+                ics::remove_future_overrides(&truncated, &req.occurrence_start, default_tz)
             }
         }
         _ => return Err(format!("unknown mode {}", req.mode)),
@@ -660,6 +934,20 @@ pub async fn delete_event_occurrence(
 
     // If future truncate results in UNTIL before DTSTART, treat as delete entire series
     if req.mode == "future" {
+        if row.all_day {
+            let master_date = row.dtstart.as_deref().and_then(|value| {
+                chrono::NaiveDate::parse_from_str(&value[..10.min(value.len())], "%Y-%m-%d").ok()
+            });
+            let occurrence_date = chrono::NaiveDate::parse_from_str(
+                &req.occurrence_start[..10.min(req.occurrence_start.len())],
+                "%Y-%m-%d",
+            )
+            .ok();
+            if matches!((master_date, occurrence_date), (Some(master), Some(occurrence)) if occurrence <= master)
+            {
+                return delete_event(state, req.id).await;
+            }
+        }
         // Quick check: parse DTSTART wall and compare
         if let Some((wall_start, tz, _)) = ics::extract_wall_dt_and_tz(&new_raw, "DTSTART") {
             // Extract UNTIL

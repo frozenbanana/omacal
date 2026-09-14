@@ -25,6 +25,13 @@ pub struct ParsedEvent {
     pub raw_ics: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct RecurrenceOverride {
+    /// Canonical occurrence identity: RFC3339 for timed events, YYYY-MM-DD for all-day events.
+    pub recurrence_id: String,
+    pub event: ParsedEvent,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventInput {
     pub calendar_id: i64,
@@ -59,10 +66,30 @@ pub fn parse_ics_with_tz(
     default_tz: Option<Tz>,
 ) -> Option<ParsedEvent> {
     let cal: Calendar = raw.parse().ok()?;
-    let event = cal.components.iter().find_map(|c| match c {
-        CalendarComponent::Event(e) => Some(e),
-        _ => None,
-    })?;
+    let event = cal
+        .components
+        .iter()
+        .find_map(|component| match component {
+            CalendarComponent::Event(event) if event.get_recurrence_id().is_none() => Some(event),
+            _ => None,
+        })
+        .or_else(|| {
+            cal.components.iter().find_map(|component| match component {
+                CalendarComponent::Event(event) => Some(event),
+                _ => None,
+            })
+        })?;
+    let component_raw = event_component_calendar(event);
+    parse_event_component(event, &component_raw, raw, my_addresses, default_tz)
+}
+
+fn parse_event_component(
+    event: &Event,
+    component_raw: &str,
+    full_raw: &str,
+    my_addresses: &[String],
+    default_tz: Option<Tz>,
+) -> Option<ParsedEvent> {
     let uid = event
         .get_uid()
         .map(|s| s.to_string())
@@ -73,24 +100,24 @@ pub fn parse_ics_with_tz(
 
     let (dtstart, all_day) = match event.get_start() {
         Some(s) => date_perhaps_to_strings_with_tz(s, default_tz),
-        None => extract_dt_from_raw_with_tz(raw, "DTSTART", default_tz),
+        None => extract_dt_from_raw_with_tz(component_raw, "DTSTART", default_tz),
     };
     let (dtend, _) = match event.get_end() {
         Some(s) => date_perhaps_to_strings_with_tz(s, default_tz),
-        None => extract_dt_from_raw_with_tz(raw, "DTEND", default_tz),
+        None => extract_dt_from_raw_with_tz(component_raw, "DTEND", default_tz),
     };
 
     // RRULE/ORGANIZER/ATTENDEE must come from VEVENT — VTIMEZONE also has RRULE lines
-    let rrule = property_in_vevent(raw, "RRULE");
+    let rrule = property_in_vevent(component_raw, "RRULE");
     let status = event.get_status().map(|s| match s {
         EventStatus::Tentative => "TENTATIVE".into(),
         EventStatus::Cancelled => "CANCELLED".into(),
         EventStatus::Confirmed => "CONFIRMED".into(),
     });
 
-    let organizer = property_mailto_in_vevent(raw, "ORGANIZER");
-    let attendees = parse_attendees(raw);
-    let alarms = parse_alarms(raw);
+    let organizer = property_mailto_in_vevent(component_raw, "ORGANIZER");
+    let attendees = parse_attendees(component_raw);
+    let alarms = parse_alarms(component_raw);
 
     let my_partstat = effective_my_partstat(&attendees, my_addresses);
 
@@ -108,8 +135,43 @@ pub fn parse_ics_with_tz(
         attendees,
         alarms,
         my_partstat,
-        raw_ics: raw.to_string(),
+        raw_ics: full_raw.to_string(),
     })
+}
+
+fn event_component_calendar(event: &Event) -> String {
+    format!(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n{}END:VCALENDAR\r\n",
+        Component::to_string(event)
+    )
+}
+
+pub fn parse_recurrence_overrides_with_tz(
+    raw: &str,
+    my_addresses: &[String],
+    default_tz: Option<Tz>,
+) -> Vec<RecurrenceOverride> {
+    let Ok(cal) = raw.parse::<Calendar>() else {
+        return Vec::new();
+    };
+    cal.components
+        .iter()
+        .filter_map(|component| {
+            let CalendarComponent::Event(event) = component else {
+                return None;
+            };
+            let recurrence_id = event.get_recurrence_id()?;
+            let (recurrence_id, _) = date_perhaps_to_strings_with_tz(recurrence_id, default_tz);
+            let recurrence_id = recurrence_id?;
+            let component_raw = event_component_calendar(event);
+            let parsed =
+                parse_event_component(event, &component_raw, raw, my_addresses, default_tz)?;
+            Some(RecurrenceOverride {
+                recurrence_id,
+                event: parsed,
+            })
+        })
+        .collect()
 }
 
 /// Lightweight parse for .ics imports (no attendee matching needed).
@@ -377,6 +439,72 @@ fn unfold(raw: &str) -> Vec<String> {
     lines
 }
 
+#[derive(Debug, Clone)]
+enum CalendarPart {
+    Line(String),
+    Event(Vec<String>),
+}
+
+fn calendar_parts(raw: &str) -> Vec<CalendarPart> {
+    let mut parts = Vec::new();
+    let mut event_lines: Option<Vec<String>> = None;
+    for line in unfold(raw) {
+        let upper = line.to_uppercase();
+        if upper == "BEGIN:VEVENT" {
+            event_lines = Some(vec![line]);
+        } else if let Some(lines) = event_lines.as_mut() {
+            lines.push(line);
+            if upper == "END:VEVENT" {
+                parts.push(CalendarPart::Event(event_lines.take().unwrap_or_default()));
+            }
+        } else {
+            parts.push(CalendarPart::Line(line));
+        }
+    }
+    if let Some(lines) = event_lines {
+        parts.extend(lines.into_iter().map(CalendarPart::Line));
+    }
+    parts
+}
+
+fn join_calendar_parts(parts: Vec<CalendarPart>) -> String {
+    let mut lines = Vec::new();
+    for part in parts {
+        match part {
+            CalendarPart::Line(line) => lines.push(line),
+            CalendarPart::Event(event) => lines.extend(event),
+        }
+    }
+    lines.join("\r\n") + "\r\n"
+}
+
+fn event_property(lines: &[String], name: &str) -> Option<String> {
+    lines.iter().find_map(|line| {
+        let upper = line.to_uppercase();
+        if upper.starts_with(name)
+            && (upper.len() == name.len()
+                || upper.as_bytes().get(name.len()) == Some(&b';')
+                || upper.as_bytes().get(name.len()) == Some(&b':'))
+        {
+            line.split_once(':')
+                .map(|(_, value)| value.trim().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn is_master_event(lines: &[String]) -> bool {
+    event_property(lines, "RECURRENCE-ID").is_none()
+}
+
+fn event_lines_from_calendar(raw: &str, master: bool) -> Option<Vec<String>> {
+    calendar_parts(raw).into_iter().find_map(|part| match part {
+        CalendarPart::Event(lines) if is_master_event(&lines) == master => Some(lines),
+        _ => None,
+    })
+}
+
 fn parse_attendees(raw: &str) -> Vec<AttendeeInfo> {
     let mut out = Vec::new();
     let mut in_vevent = false;
@@ -502,6 +630,220 @@ pub fn build_ics(
     ics = inject_alarms(&ics, &input.alarms);
 
     Ok((uid, ics))
+}
+
+fn canonical_recurrence_id(lines: &[String], default_tz: Option<Tz>) -> Option<String> {
+    let line = lines
+        .iter()
+        .find(|line| line.to_uppercase().starts_with("RECURRENCE-ID"))?;
+    let (left, value) = line.split_once(':')?;
+    let value = value.trim();
+    let upper = left.to_uppercase();
+    if upper.contains("VALUE=DATE") || value.len() == 8 {
+        return NaiveDate::parse_from_str(value, "%Y%m%d")
+            .ok()
+            .map(|date| date.format("%Y-%m-%d").to_string());
+    }
+    if value.ends_with('Z') {
+        return DateTime::parse_from_str(value, "%Y%m%dT%H%M%SZ")
+            .ok()
+            .map(|dt| dt.with_timezone(&Utc).to_rfc3339());
+    }
+    let naive = chrono::NaiveDateTime::parse_from_str(value, "%Y%m%dT%H%M%S").ok()?;
+    let tz = left
+        .split(';')
+        .find_map(|parameter| parameter.split_once('='))
+        .filter(|(key, _)| key.eq_ignore_ascii_case("TZID"))
+        .and_then(|(_, value)| value.trim_matches('"').parse::<Tz>().ok())
+        .or(default_tz);
+    if let Some(tz) = tz {
+        tz.from_local_datetime(&naive)
+            .single()
+            .or_else(|| tz.from_local_datetime(&naive).earliest())
+            .map(|dt| dt.with_timezone(&Utc).to_rfc3339())
+    } else {
+        Some(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc).to_rfc3339())
+    }
+}
+
+fn recurrence_id_line(
+    master_raw: &str,
+    recurrence_id: &str,
+    fallback_tz: Option<Tz>,
+) -> Result<String, String> {
+    let master = event_lines_from_calendar(master_raw, true)
+        .ok_or_else(|| "recurring event has no master VEVENT".to_string())?;
+    let dtstart = master
+        .iter()
+        .find(|line| line.to_uppercase().starts_with("DTSTART"))
+        .ok_or_else(|| "recurring event has no DTSTART".to_string())?;
+    let (left, master_value) = dtstart
+        .split_once(':')
+        .ok_or_else(|| "invalid master DTSTART".to_string())?;
+    let upper = left.to_uppercase();
+    if upper.contains("VALUE=DATE") || master_value.trim().len() == 8 {
+        let date =
+            NaiveDate::parse_from_str(&recurrence_id[..10.min(recurrence_id.len())], "%Y-%m-%d")
+                .map_err(|_| format!("cannot parse recurrence_id {recurrence_id}"))?;
+        return Ok(format!(
+            "RECURRENCE-ID;VALUE=DATE:{}",
+            date.format("%Y%m%d")
+        ));
+    }
+
+    let instant = DateTime::parse_from_rfc3339(recurrence_id)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|_| format!("cannot parse recurrence_id {recurrence_id}"))?;
+    let tzid = left
+        .split(';')
+        .find_map(|parameter| parameter.split_once('='))
+        .filter(|(key, _)| key.eq_ignore_ascii_case("TZID"))
+        .map(|(_, value)| value.trim_matches('"').to_string());
+    if let Some(tzid) = tzid {
+        let tz = tzid
+            .parse::<Tz>()
+            .map_err(|_| format!("invalid DTSTART timezone {tzid}"))?;
+        return Ok(format!(
+            "RECURRENCE-ID;TZID={}:{}",
+            tz.name(),
+            instant.with_timezone(&tz).format("%Y%m%dT%H%M%S")
+        ));
+    }
+    if dtstart.trim_end().ends_with('Z') {
+        return Ok(format!(
+            "RECURRENCE-ID:{}",
+            instant.format("%Y%m%dT%H%M%SZ")
+        ));
+    }
+    let tz = fallback_tz.unwrap_or_else(default_tz);
+    Ok(format!(
+        "RECURRENCE-ID:{}",
+        instant.with_timezone(&tz).format("%Y%m%dT%H%M%S")
+    ))
+}
+
+fn with_recurrence_id(mut event: Vec<String>, line: String) -> Vec<String> {
+    event.retain(|value| !value.to_uppercase().starts_with("RECURRENCE-ID"));
+    let position = event
+        .iter()
+        .position(|value| value.to_uppercase().starts_with("UID:"))
+        .map(|position| position + 1)
+        .unwrap_or(1);
+    event.insert(position, line);
+    event
+}
+
+pub fn upsert_occurrence_override(
+    raw: &str,
+    recurrence_id: &str,
+    input: &EventInput,
+    default_timezone: Option<Tz>,
+) -> Result<String, String> {
+    let master = parse_ics_with_tz(raw, &[], default_timezone)
+        .ok_or_else(|| "cannot parse recurring event master".to_string())?;
+    let (_, built) = build_ics(input, Some(&master.uid))?;
+    let event = event_lines_from_calendar(&built, true)
+        .ok_or_else(|| "failed to build occurrence VEVENT".to_string())?;
+    let recurrence_line = recurrence_id_line(raw, recurrence_id, default_timezone)?;
+    let replacement = with_recurrence_id(event, recurrence_line);
+    let mut parts = calendar_parts(raw);
+    let mut replaced = false;
+    parts.retain_mut(|part| {
+        let CalendarPart::Event(lines) = part else {
+            return true;
+        };
+        if canonical_recurrence_id(lines, default_timezone).as_deref() != Some(recurrence_id) {
+            return true;
+        }
+        if replaced {
+            return false;
+        }
+        *lines = replacement.clone();
+        replaced = true;
+        true
+    });
+    if !replaced {
+        let position = parts
+            .iter()
+            .position(|part| matches!(part, CalendarPart::Line(line) if line.eq_ignore_ascii_case("END:VCALENDAR")))
+            .unwrap_or(parts.len());
+        parts.insert(position, CalendarPart::Event(replacement));
+    }
+    Ok(join_calendar_parts(parts))
+}
+
+pub fn replace_master_event(
+    raw: &str,
+    built: &str,
+    keep_overrides: bool,
+) -> Result<String, String> {
+    let replacement = event_lines_from_calendar(built, true)
+        .ok_or_else(|| "failed to build master VEVENT".to_string())?;
+    let mut parts = calendar_parts(raw);
+    let mut replaced = false;
+    parts.retain_mut(|part| match part {
+        CalendarPart::Event(lines) if is_master_event(lines) => {
+            if !replaced {
+                *lines = replacement.clone();
+                replaced = true;
+                true
+            } else {
+                false
+            }
+        }
+        CalendarPart::Event(_) => keep_overrides,
+        CalendarPart::Line(_) => true,
+    });
+    if !replaced {
+        return Err("existing calendar object has no master VEVENT".to_string());
+    }
+    Ok(join_calendar_parts(parts))
+}
+
+pub fn remove_occurrence_override(
+    raw: &str,
+    recurrence_id: &str,
+    default_timezone: Option<Tz>,
+) -> String {
+    let mut parts = calendar_parts(raw);
+    parts.retain(|part| match part {
+        CalendarPart::Event(lines) => {
+            canonical_recurrence_id(lines, default_timezone).as_deref() != Some(recurrence_id)
+        }
+        CalendarPart::Line(_) => true,
+    });
+    join_calendar_parts(parts)
+}
+
+pub fn remove_future_overrides(
+    raw: &str,
+    recurrence_id: &str,
+    default_timezone: Option<Tz>,
+) -> String {
+    let cutoff_time = DateTime::parse_from_rfc3339(recurrence_id)
+        .ok()
+        .map(|dt| dt.with_timezone(&Utc));
+    let cutoff_date =
+        NaiveDate::parse_from_str(&recurrence_id[..10.min(recurrence_id.len())], "%Y-%m-%d").ok();
+    let mut parts = calendar_parts(raw);
+    parts.retain(|part| match part {
+        CalendarPart::Event(lines) if !is_master_event(lines) => {
+            let Some(id) = canonical_recurrence_id(lines, default_timezone) else {
+                return true;
+            };
+            if let (Some(cutoff), Ok(value)) = (cutoff_time, DateTime::parse_from_rfc3339(&id)) {
+                value.with_timezone(&Utc) < cutoff
+            } else if let (Some(cutoff), Ok(value)) =
+                (cutoff_date, NaiveDate::parse_from_str(&id, "%Y-%m-%d"))
+            {
+                value < cutoff
+            } else {
+                true
+            }
+        }
+        _ => true,
+    });
+    join_calendar_parts(parts)
 }
 
 fn inject_times(ics: &str, input: &EventInput) -> Result<String, String> {
@@ -785,10 +1127,75 @@ pub fn expand_rrule_occurrences(
         .collect()
 }
 
+pub fn expand_rrule_all_day_dates(
+    dtstart: &str,
+    rrule: &str,
+    range_start: NaiveDate,
+    range_end: NaiveDate,
+) -> Vec<NaiveDate> {
+    use rrule::RRuleSet;
+    let Ok(start) = NaiveDate::parse_from_str(&dtstart[..10.min(dtstart.len())], "%Y-%m-%d") else {
+        return Vec::new();
+    };
+    let rule_str = if rrule.to_uppercase().starts_with("RRULE:") {
+        format!("DTSTART:{}T000000Z\n{}", start.format("%Y%m%d"), rrule)
+    } else {
+        format!(
+            "DTSTART:{}T000000Z\nRRULE:{}",
+            start.format("%Y%m%d"),
+            rrule
+        )
+    };
+    let Ok(set) = rule_str.parse::<RRuleSet>() else {
+        return vec![start];
+    };
+    set.into_iter()
+        .map(|dt| dt.with_timezone(&Utc).date_naive())
+        .skip_while(|date| *date < range_start)
+        .take_while(|date| *date <= range_end)
+        .take(500)
+        .collect()
+}
+
+pub fn parse_all_day_exdates(raw: &str) -> Vec<NaiveDate> {
+    let master = event_lines_from_calendar(raw, true).unwrap_or_default();
+    let mut out = Vec::new();
+    for line in master {
+        let upper = line.to_uppercase();
+        if !upper.starts_with("EXDATE") {
+            continue;
+        }
+        let Some((_, values)) = line.split_once(':') else {
+            continue;
+        };
+        for value in values.split(',') {
+            if let Ok(date) = NaiveDate::parse_from_str(value.trim(), "%Y%m%d") {
+                out.push(date);
+            }
+        }
+    }
+    out
+}
+
+pub fn expand_all_day_from_raw(
+    raw: &str,
+    dtstart: &str,
+    rrule: &str,
+    range_start: NaiveDate,
+    range_end: NaiveDate,
+) -> Vec<NaiveDate> {
+    let mut dates = expand_rrule_all_day_dates(dtstart, rrule, range_start, range_end);
+    let exclusions: std::collections::HashSet<NaiveDate> =
+        parse_all_day_exdates(raw).into_iter().collect();
+    dates.retain(|date| !exclusions.contains(date));
+    dates
+}
+
 /// Parse all EXDATE values from raw ICS, returning UTC instants (filtered to same tz logic as DTSTART).
 pub fn parse_exdates(raw: &str, default_tz: Option<Tz>) -> Vec<DateTime<Utc>> {
     let mut out = Vec::new();
-    for line in unfold(raw) {
+    let master = event_lines_from_calendar(raw, true).unwrap_or_default();
+    for line in master {
         let upper = line.to_uppercase();
         if !upper.starts_with("EXDATE") {
             continue;
@@ -883,7 +1290,33 @@ pub fn inject_exdate(raw: &str, occurrence_utc: DateTime<Utc>, dtstart_tz: Optio
         return raw.to_string();
     }
     // Determine EXDATE string form to match DTSTART
-    let exdate_val = if let Some(tz) = dtstart_tz {
+    let master = event_lines_from_calendar(raw, true).unwrap_or_default();
+    let master_all_day = master.iter().any(|line| {
+        let upper = line.to_uppercase();
+        upper.starts_with("DTSTART")
+            && (upper.contains("VALUE=DATE")
+                || line
+                    .split_once(':')
+                    .is_some_and(|(_, value)| value.trim().len() == 8))
+    });
+    if master_all_day {
+        let date = if let Some(tz) = dtstart_tz {
+            occurrence_utc.with_timezone(&tz).date_naive()
+        } else {
+            occurrence_utc.date_naive()
+        };
+        if parse_all_day_exdates(raw).contains(&date) {
+            return raw.to_string();
+        }
+    }
+    let exdate_val = if master_all_day {
+        let date = if let Some(tz) = dtstart_tz {
+            occurrence_utc.with_timezone(&tz).date_naive()
+        } else {
+            occurrence_utc.date_naive()
+        };
+        format!("EXDATE;VALUE=DATE:{}", date.format("%Y%m%d"))
+    } else if let Some(tz) = dtstart_tz {
         let wall = occurrence_utc.with_timezone(&tz).naive_local();
         format!("EXDATE;TZID={}:{}", tz.name(), wall.format("%Y%m%dT%H%M%S"))
     } else {
@@ -908,39 +1341,32 @@ pub fn inject_exdate(raw: &str, occurrence_utc: DateTime<Utc>, dtstart_tz: Optio
         }
     };
     // Append to existing EXDATE line if present, else add before END:VEVENT
-    let mut lines = unfold(raw);
-    let mut found_idx: Option<usize> = None;
-    for (i, line) in lines.iter().enumerate() {
-        if line.to_uppercase().starts_with("EXDATE") {
-            found_idx = Some(i);
+    let mut parts = calendar_parts(raw);
+    for part in &mut parts {
+        let CalendarPart::Event(lines) = part else {
+            continue;
+        };
+        if !is_master_event(lines) {
+            continue;
         }
-    }
-    if let Some(idx) = found_idx {
-        let merged = format!(
-            "{},{}",
-            lines[idx].trim_end(),
-            exdate_val.split(':').nth(1).unwrap_or("")
-        );
-        // If existing line had TZID param, we should keep it — already handled by using same TZID form above
-        // Simplify: if we generated TZID form, replace whole line with combined values
-        if lines[idx].to_uppercase().contains("TZID=") && exdate_val.contains("TZID=") {
-            // Both TZID — merge values after ':'
+        if let Some(idx) = lines
+            .iter()
+            .position(|line| line.to_uppercase().starts_with("EXDATE"))
+        {
             let prefix = lines[idx].split(':').next().unwrap_or("EXDATE");
-            let existing_vals = lines[idx].split(':').nth(1).unwrap_or("");
-            let new_val = exdate_val.split(':').nth(1).unwrap_or("");
-            lines[idx] = format!("{}:{},{}", prefix, existing_vals, new_val);
+            let existing = lines[idx].split(':').nth(1).unwrap_or("");
+            let value = exdate_val.split(':').nth(1).unwrap_or("");
+            lines[idx] = format!("{prefix}:{existing},{value}");
         } else {
-            lines[idx] = merged;
+            let position = lines
+                .iter()
+                .position(|line| line.eq_ignore_ascii_case("END:VEVENT"))
+                .unwrap_or(lines.len());
+            lines.insert(position, exdate_val.clone());
         }
-    } else {
-        // insert before END:VEVENT
-        if let Some(pos) = lines.iter().position(|l| l.to_uppercase() == "END:VEVENT") {
-            lines.insert(pos, exdate_val);
-        } else {
-            lines.push(exdate_val);
-        }
+        break;
     }
-    lines.join("\r\n") + "\r\n"
+    join_calendar_parts(parts)
 }
 
 /// Truncate RRULE with UNTIL (keeps wall semantics). Returns new raw ICS.
@@ -950,8 +1376,6 @@ pub fn truncate_rrule_until(
     until_tz: Option<Tz>,
     is_all_day: bool,
 ) -> String {
-    let mut lines = unfold(raw);
-    let mut new_lines = Vec::new();
     let until_str = if is_all_day {
         format!("UNTIL={}", until_wall.format("%Y%m%d"))
     } else if let Some(tz) = until_tz {
@@ -976,24 +1400,33 @@ pub fn truncate_rrule_until(
             .to_string()
     };
     let until_str = format!("UNTIL={}", until_str.split('=').nth(1).unwrap_or(""));
-    for line in lines.drain(..) {
-        let upper = line.to_uppercase();
-        if upper.starts_with("RRULE") {
-            // parse RRULE, drop COUNT, add/replace UNTIL
-            let rrule_val = line.split(':').nth(1).unwrap_or("").to_string();
-            // Split into k=v pairs
-            let mut parts: Vec<String> = rrule_val.split(';').map(|s| s.to_string()).collect();
-            parts.retain(|p| {
-                !p.to_uppercase().starts_with("COUNT=") && !p.to_uppercase().starts_with("UNTIL=")
-            });
-            parts.push(until_str.clone());
-            let new_rrule = format!("RRULE:{}", parts.join(";"));
-            new_lines.push(new_rrule);
-        } else {
-            new_lines.push(line);
+    let mut calendar = calendar_parts(raw);
+    for part in &mut calendar {
+        let CalendarPart::Event(lines) = part else {
+            continue;
+        };
+        if !is_master_event(lines) {
+            continue;
         }
+        for line in lines {
+            if !line.to_uppercase().starts_with("RRULE") {
+                continue;
+            }
+            let rrule_val = line.split(':').nth(1).unwrap_or("").to_string();
+            let mut rule_parts: Vec<String> = rrule_val
+                .split(';')
+                .map(|value| value.to_string())
+                .collect();
+            rule_parts.retain(|part| {
+                !part.to_uppercase().starts_with("COUNT=")
+                    && !part.to_uppercase().starts_with("UNTIL=")
+            });
+            rule_parts.push(until_str.clone());
+            *line = format!("RRULE:{}", rule_parts.join(";"));
+        }
+        break;
     }
-    new_lines.join("\r\n") + "\r\n"
+    join_calendar_parts(calendar)
 }
 
 /// Try wall+TZ expansion from raw ICS; fallback to UTC. Also filters EXDATEs.
@@ -1360,5 +1793,150 @@ END:VCALENDAR\r\n";
         let parsed = parse_ics(&ics, &[]).expect("parse");
         assert_eq!(parsed.uid, uid);
         assert_eq!(parsed.summary, "Test meeting");
+    }
+
+    #[test]
+    fn occurrence_override_keeps_original_identity_and_scopes_fields() {
+        const MASTER: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:series-1\r\nDTSTART;TZID=Europe/Stockholm:20260810T060000\r\nDTEND;TZID=Europe/Stockholm:20260810T070000\r\nRRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:Morning practice\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let input = EventInput {
+            calendar_id: 1,
+            uid: Some("series-1".into()),
+            summary: "Late practice".into(),
+            description: "Only this Monday".into(),
+            location: "Other gym".into(),
+            dtstart: "2026-08-17T10:00:00".into(),
+            dtend: "2026-08-17T11:30:00".into(),
+            all_day: false,
+            timezone: "Europe/Stockholm".into(),
+            rrule: None,
+            alarms: vec![crate::db::AlarmInfo {
+                trigger: "-PT30M".into(),
+                description: Some("Reminder".into()),
+            }],
+            attendees: vec![crate::db::AttendeeInfo {
+                email: "guest@example.com".into(),
+                cn: None,
+                partstat: Some("NEEDS-ACTION".into()),
+                role: Some("REQ-PARTICIPANT".into()),
+                rsvp: true,
+            }],
+            href: None,
+            etag: None,
+        };
+        let recurrence_id = "2026-08-17T04:00:00+00:00";
+        let tz: Tz = "Europe/Stockholm".parse().unwrap();
+        let raw =
+            upsert_occurrence_override(MASTER, recurrence_id, &input, Some(tz)).expect("override");
+        assert!(raw.contains("RECURRENCE-ID;TZID=Europe/Stockholm:20260817T060000"));
+        assert!(raw.contains("DTSTART;TZID=Europe/Stockholm:20260817T100000"));
+
+        let master = parse_ics_with_tz(&raw, &[], Some(tz)).expect("master");
+        assert_eq!(master.summary, "Morning practice");
+        assert!(master.attendees.is_empty());
+        assert!(master.alarms.is_empty());
+
+        let overrides = parse_recurrence_overrides_with_tz(&raw, &[], Some(tz));
+        assert_eq!(overrides.len(), 1);
+        assert_eq!(overrides[0].recurrence_id, recurrence_id);
+        assert_eq!(overrides[0].event.summary, "Late practice");
+        assert_eq!(
+            overrides[0].event.dtstart.as_deref(),
+            Some("2026-08-17T08:00:00+00:00")
+        );
+        assert_eq!(overrides[0].event.attendees.len(), 1);
+        assert_eq!(overrides[0].event.alarms.len(), 1);
+
+        let replaced = upsert_occurrence_override(&raw, recurrence_id, &input, Some(tz))
+            .expect("replace override");
+        assert_eq!(replaced.matches("RECURRENCE-ID").count(), 1);
+        let removed = remove_occurrence_override(&replaced, recurrence_id, Some(tz));
+        assert!(!removed.contains("RECURRENCE-ID"));
+        assert_eq!(
+            parse_ics(&removed, &[]).unwrap().summary,
+            "Morning practice"
+        );
+    }
+
+    #[test]
+    fn replacing_master_preserves_occurrence_overrides() {
+        const MASTER: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:series-2\r\nDTSTART;TZID=Europe/Stockholm:20260810T060000\r\nDTEND;TZID=Europe/Stockholm:20260810T070000\r\nRRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:Old title\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let tz: Tz = "Europe/Stockholm".parse().unwrap();
+        let occurrence = EventInput {
+            calendar_id: 1,
+            uid: Some("series-2".into()),
+            summary: "One-off title".into(),
+            description: String::new(),
+            location: String::new(),
+            dtstart: "2026-08-17T08:00:00".into(),
+            dtend: "2026-08-17T09:00:00".into(),
+            all_day: false,
+            timezone: "Europe/Stockholm".into(),
+            rrule: None,
+            alarms: vec![],
+            attendees: vec![],
+            href: None,
+            etag: None,
+        };
+        let with_override =
+            upsert_occurrence_override(MASTER, "2026-08-17T04:00:00+00:00", &occurrence, Some(tz))
+                .unwrap();
+        let mut series = occurrence.clone();
+        series.summary = "New series title".into();
+        series.dtstart = "2026-08-10T06:00:00".into();
+        series.dtend = "2026-08-10T07:00:00".into();
+        series.rrule = Some("FREQ=WEEKLY;BYDAY=MO".into());
+        let (_, built) = build_ics(&series, Some("series-2")).unwrap();
+        let merged = replace_master_event(&with_override, &built, true).unwrap();
+        assert_eq!(parse_ics(&merged, &[]).unwrap().summary, "New series title");
+        let overrides = parse_recurrence_overrides_with_tz(&merged, &[], Some(tz));
+        assert_eq!(overrides.len(), 1);
+        assert_eq!(overrides[0].event.summary, "One-off title");
+    }
+
+    #[test]
+    fn all_day_recurrence_expands_and_uses_date_identity() {
+        const MASTER: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:days-1\r\nDTSTART;VALUE=DATE:20260914\r\nDTEND;VALUE=DATE:20260915\r\nRRULE:FREQ=WEEKLY;COUNT=3\r\nSUMMARY:Weekly day\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let dates = expand_all_day_from_raw(
+            MASTER,
+            "2026-09-14",
+            "FREQ=WEEKLY;COUNT=3",
+            NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+        );
+        assert_eq!(dates.len(), 3);
+        let input = EventInput {
+            calendar_id: 1,
+            uid: Some("days-1".into()),
+            summary: "Moved day".into(),
+            description: String::new(),
+            location: String::new(),
+            dtstart: "2026-09-23".into(),
+            dtend: "2026-09-24".into(),
+            all_day: true,
+            timezone: "Europe/Stockholm".into(),
+            rrule: None,
+            alarms: vec![],
+            attendees: vec![],
+            href: None,
+            etag: None,
+        };
+        let raw = upsert_occurrence_override(MASTER, "2026-09-21", &input, None).unwrap();
+        assert!(raw.contains("RECURRENCE-ID;VALUE=DATE:20260921"));
+        let overrides = parse_recurrence_overrides_with_tz(&raw, &[], None);
+        assert_eq!(overrides[0].recurrence_id, "2026-09-21");
+        assert_eq!(overrides[0].event.dtstart.as_deref(), Some("2026-09-23"));
+    }
+
+    #[test]
+    fn truncating_series_does_not_rewrite_timezone_rrule() {
+        const ICS: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTIMEZONE\r\nTZID:Europe/Stockholm\r\nBEGIN:DAYLIGHT\r\nDTSTART:19810329T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:tz-series\r\nDTSTART;TZID=Europe/Stockholm:20260810T060000\r\nDTEND;TZID=Europe/Stockholm:20260810T070000\r\nRRULE:FREQ=WEEKLY;BYDAY=MO\r\nSUMMARY:Practice\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let tz: Tz = "Europe/Stockholm".parse().unwrap();
+        let until = NaiveDate::from_ymd_opt(2026, 8, 16)
+            .unwrap()
+            .and_hms_opt(23, 59, 59)
+            .unwrap();
+        let truncated = truncate_rrule_until(ICS, until, Some(tz), false);
+        assert!(truncated.contains("RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU"));
+        assert!(truncated.contains("RRULE:FREQ=WEEKLY;BYDAY=MO;UNTIL="));
     }
 }
