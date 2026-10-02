@@ -1,7 +1,7 @@
 {
   "name": "omacal",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Omarchy-native CalDAV calendar for Hyprland / Arch",
   "author": "Henry Bergstrom",
   "license": "MIT",

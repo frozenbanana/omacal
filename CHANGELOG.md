@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-02
+
+### Added
+- Edit individual recurring events: editing one occurrence edits the master while keeping `master_start`, with a `ConfirmRecurrenceEdit` dialog to scope changes to a single instance, this-and-future, or the whole series.
+- WebKitGTK `WEBKIT_DISABLE_DMABUF_RENDERER=1` default in `main.rs` to avoid startup kills on hybrid Intel/NVIDIA systems (respects a user-supplied value).
+
+### Changed
+- Faster calendar writes: reduced latency in CalDAV PUT / sync path.
+- CI: Rust job now installs system deps (glib-2.0) and builds the frontend (`npm ci` + `npm run build`) so the Tauri context resolves `frontendDist`.
+
+### Fixed
+- Splash no longer hangs: null CSP + 5s ready fallback.
+- Lint gate clean (`--max-warnings 0`) and removed stale `omarcal` target path in cargo clean.
+
 ## [0.3.0] - 2026-08-21
 
 ### Changed
