@@ -6,7 +6,7 @@
   --cursor: #d8dee9;
   --sel-fg: #2e3440;
   --sel-bg: #d8dee9;
-  --muted: color-mix(in srgb, var(--fg) 55%, transparent);
+  --muted: color-mix(in srgb, var(--fg) 70%, var(--bg));
   --panel: color-mix(in srgb, var(--fg) 6%, var(--bg));
   --border: color-mix(in srgb, var(--fg) 14%, transparent);
   --danger: #ff6b7a;
@@ -48,7 +48,7 @@ textarea {
 
 input::placeholder,
 textarea::placeholder {
-  color: color-mix(in srgb, var(--fg) 45%, var(--bg));
+  color: color-mix(in srgb, var(--fg) 60%, var(--bg));
 }
 
 input:focus,

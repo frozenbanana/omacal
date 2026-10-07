@@ -2,7 +2,7 @@ use crate::config::{self, AccountConfig, AppConfig};
 use crate::db::{AlarmInfo, AttendeeInfo, CalendarRow, Db, EventRow};
 use crate::ics::{self, EventInput};
 use crate::secrets;
-use crate::sync::{SyncEngine, SyncReport};
+use crate::sync::{is_network_error, SyncEngine, SyncReport};
 use crate::theme::{self, ThemeColors};
 use chrono::TimeZone;
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,7 @@ pub struct AppSnapshot {
     pub theme: ThemeColors,
     pub last_sync: Option<String>,
     pub last_sync_error: Option<String>,
+    pub outbox_count: u64,
     pub default_calendar_id: Option<i64>,
 }
 
@@ -391,6 +392,7 @@ pub fn get_snapshot(state: State<'_, AppState>) -> Result<AppSnapshot, String> {
             .flatten()
             .filter(|s| !s.is_empty()),
         default_calendar_id: state.db.get_default_calendar_id().ok().flatten(),
+        outbox_count: state.db.count_outbox(),
     })
 }
 
@@ -642,10 +644,21 @@ pub async fn save_event(state: State<'_, AppState>, input: EventInput) -> Result
         .clone()
         .or_else(|| existing.as_ref().and_then(|e| e.etag.clone()));
 
-    let new_etag = state
+    let new_etag = match state
         .sync
         .push_event(&account, &cal.href, &href, &ics_body, etag.as_deref())
-        .await?;
+        .await
+    {
+        Ok(et) => et,
+        Err(e) if is_network_error(&e) => {
+            log::warn!("offline: queueing event PUT for {uid}");
+            let _ = state
+                .db
+                .enqueue_outbox(cal.id, "put", &href, &uid, &ics_body, etag.as_deref());
+            etag.clone()
+        }
+        Err(e) => return Err(e),
+    };
 
     let default_tz = input.timezone.parse::<chrono_tz::Tz>().ok();
     let parsed = ics::parse_ics_with_tz(&ics_body, &account.addresses, default_tz)
@@ -728,10 +741,21 @@ pub async fn save_event_occurrence(
     let new_raw =
         ics::upsert_occurrence_override(&row.raw_ics, &req.recurrence_id, &req.input, default_tz)?;
     let etag = req.input.etag.as_deref().or(row.etag.as_deref());
-    let new_etag = state
+    let new_etag = match state
         .sync
         .push_event(&account, &cal.href, &row.href, &new_raw, etag)
-        .await?;
+        .await
+    {
+        Ok(et) => et,
+        Err(e) if is_network_error(&e) => {
+            log::warn!("offline: queueing occurrence PUT for {}", row.uid);
+            let _ = state
+                .db
+                .enqueue_outbox(cal.id, "put", &row.href, &row.uid, &new_raw, etag);
+            etag.map(|s| s.to_string())
+        }
+        Err(e) => return Err(e),
+    };
 
     let parsed = ics::parse_ics_with_tz(&new_raw, &account.addresses, default_tz)
         .or_else(|| ics::parse_ics(&new_raw, &account.addresses))
@@ -785,10 +809,25 @@ pub async fn delete_event(state: State<'_, AppState>, id: i64) -> Result<(), Str
         .find(|a| a.id == cal.account_id)
         .ok_or_else(|| "account not found".to_string())?;
 
-    state
+    match state
         .sync
         .delete_remote(account, &row.href, row.etag.as_deref())
-        .await?;
+        .await
+    {
+        Ok(()) => {}
+        Err(e) if is_network_error(&e) => {
+            log::warn!("offline: queueing event DELETE for {}", row.uid);
+            let _ = state.db.enqueue_outbox(
+                cal.id,
+                "delete",
+                &row.href,
+                &row.uid,
+                row.raw_ics.as_str(),
+                row.etag.as_deref(),
+            );
+        }
+        Err(e) => return Err(e),
+    }
     state
         .db
         .delete_object_by_id(id)
@@ -1022,7 +1061,7 @@ pub async fn delete_event_occurrence(
         }
     }
 
-    let new_etag = state
+    let new_etag = match state
         .sync
         .push_event(
             &account,
@@ -1031,7 +1070,23 @@ pub async fn delete_event_occurrence(
             &new_raw,
             row.etag.as_deref(),
         )
-        .await?;
+        .await
+    {
+        Ok(et) => et,
+        Err(e) if is_network_error(&e) => {
+            log::warn!("offline: queueing occurrence delete PUT for {}", row.uid);
+            let _ = state.db.enqueue_outbox(
+                cal.id,
+                "put",
+                &row.href,
+                &row.uid,
+                &new_raw,
+                row.etag.as_deref(),
+            );
+            row.etag.clone()
+        }
+        Err(e) => return Err(e),
+    };
 
     let tz_hint = ics::extract_wall_dt_and_tz(&new_raw, "DTSTART")
         .and_then(|(_, tz, _)| tz)
@@ -1167,7 +1222,7 @@ async fn apply_rsvp_on(
         .clone();
 
     let new_ics = ics::set_partstat_in_ics(&row.raw_ics, &account.addresses, partstat);
-    let new_etag = state
+    let new_etag = match state
         .sync
         .push_event(
             &account,
@@ -1176,7 +1231,23 @@ async fn apply_rsvp_on(
             &new_ics,
             row.etag.as_deref(),
         )
-        .await?;
+        .await
+    {
+        Ok(et) => et,
+        Err(e) if is_network_error(&e) => {
+            log::warn!("offline: queueing RSVP PUT for {}", row.uid);
+            let _ = state.db.enqueue_outbox(
+                cal.id,
+                "put",
+                &row.href,
+                &row.uid,
+                &new_ics,
+                row.etag.as_deref(),
+            );
+            row.etag.clone()
+        }
+        Err(e) => return Err(e),
+    };
 
     let tz_hint = {
         // try to extract TZID from the ICS, else use config timezone

@@ -5,6 +5,33 @@ use crate::ics;
 use crate::secrets;
 use std::sync::{Arc, OnceLock};
 
+/// Heuristic: does a CalDAV error string indicate a network/connectivity
+/// failure (as opposed to an HTTP-level rejection like 401/403/412)?
+/// Used to decide whether to queue a write in the offline outbox.
+pub fn is_network_error(e: &str) -> bool {
+    let low = e.to_lowercase();
+    // Server replies with an HTTP status are always "PUT failed: NNN .." / "DELETE failed: ..";
+    // reqwest send failures mention "error sending request".
+    if low.contains("put failed") || low.contains("delete failed") || low.contains("unauthorized") {
+        return false;
+    }
+    const HINTS: [&str; 12] = [
+        "error sending request",
+        "timed out",
+        "timeout",
+        "connection",
+        "dns error",
+        "temporary failure",
+        "unreachable",
+        "refused",
+        "reset by peer",
+        "broken pipe",
+        "tls",
+        "certificate",
+    ];
+    HINTS.iter().any(|h| low.contains(h))
+}
+
 pub struct SyncEngine {
     pub db: Arc<Db>,
     http: OnceLock<reqwest::Client>,
@@ -70,6 +97,11 @@ impl SyncEngine {
         }
 
         let mut report = SyncReport::default();
+        // Replay queued offline writes first, so the pull phase below
+        // sees post-replay server state (deletes, renames, ...).
+        if let Err(e) = self.flush_outbox(cfg, &mut report).await {
+            report.errors.push(format!("outbox flush failed: {e}"));
+        }
         for account in cfg.accounts.iter().filter(|a| a.enabled) {
             match self.sync_account(account, cfg).await {
                 Ok(r) => {
@@ -201,6 +233,122 @@ impl SyncEngine {
         Ok(report)
     }
 
+    /// Replay queued offline writes (PUT/DELETE) against their calendars.
+    /// Runs before the pull phase of each sync so queued deletes are
+    /// reflected before sync-collection re-downloads unchanged objects.
+    pub async fn flush_outbox(
+        &self,
+        cfg: &AppConfig,
+        report: &mut SyncReport,
+    ) -> Result<usize, String> {
+        let rows = self.db.list_outbox().map_err(|e| e.to_string())?;
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let mut replayed = 0usize;
+        let mut offline_stopped = false;
+        for row in rows {
+            if offline_stopped {
+                continue; // network is down — leave remaining rows queued
+            }
+            let cal = match self.db.get_calendar(row.calendar_id).ok().flatten() {
+                Some(c) => c,
+                None => {
+                    // Calendar vanished locally; discard the stale op.
+                    let _ = self.db.remove_outbox(row.id);
+                    continue;
+                }
+            };
+            let Some(account) = cfg.accounts.iter().find(|a| a.id == cal.account_id) else {
+                let _ = self.db.remove_outbox(row.id);
+                continue;
+            };
+            if !account.enabled {
+                continue;
+            }
+            let href = match &row.href {
+                Some(h) => h.clone(),
+                None => {
+                    let _ = self.db.remove_outbox(row.id);
+                    continue;
+                }
+            };
+
+            let result = match row.op.as_str() {
+                "put" => {
+                    let raw = match &row.raw_ics {
+                        Some(r) => r.clone(),
+                        None => {
+                            let _ = self.db.remove_outbox(row.id);
+                            continue;
+                        }
+                    };
+                    match self
+                        .push_event(account, &cal.href, &href, &raw, row.etag.as_deref())
+                        .await
+                    {
+                        Ok(new_etag) => {
+                            // Keep the local row in sync with the server etag.
+                            if let Some(existing) =
+                                self.db.get_object_by_href(cal.id, &href).ok().flatten()
+                            {
+                                let _ = self.db.set_object_etag(existing.id, new_etag.as_deref());
+                            }
+                            Ok(())
+                        }
+                        Err(e) => {
+                            // Stale If-Match etag: retry once without it (last-write-wins).
+                            if e.contains("412") {
+                                self.push_event(account, &cal.href, &href, &raw, None)
+                                    .await
+                                    .map(|_: Option<String>| ())
+                            } else {
+                                Err(e)
+                            }
+                        }
+                    }
+                }
+                "delete" => {
+                    self.delete_remote(account, &href, row.etag.as_deref())
+                        .await
+                }
+                other => {
+                    log::warn!("unknown outbox op '{other}' — dropping row {}", row.id);
+                    let _ = self.db.remove_outbox(row.id);
+                    continue;
+                }
+            };
+
+            match result {
+                Ok(()) => {
+                    let _ = self.db.remove_outbox(row.id);
+                    replayed += 1;
+                }
+                Err(e) => {
+                    if is_network_error(&e) {
+                        offline_stopped = true;
+                        let _ = self.db.bump_outbox_attempts(row.id, &e);
+                        continue;
+                    }
+                    // Permanent failures (4xx): retries won't help.
+                    // Give up after 5 attempts so the queue can't wedge forever.
+                    match self.db.bump_outbox_attempts(row.id, &e) {
+                        Ok(n) if n >= 5 => {
+                            let _ = self.db.remove_outbox(row.id);
+                            report.errors.push(format!(
+                                "dropped queued {} for {} after {n} attempts: {e}",
+                                row.op, row.uid
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        report.flushed = replayed;
+        Ok(replayed)
+    }
+
     pub async fn push_event(
         &self,
         account: &AccountConfig,
@@ -268,5 +416,6 @@ pub struct SyncReport {
     pub calendars: usize,
     pub objects: usize,
     pub deleted: usize,
+    pub flushed: usize,
     pub errors: Vec<String>,
 }

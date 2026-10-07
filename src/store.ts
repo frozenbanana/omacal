@@ -146,6 +146,7 @@ type Store = {
   theme?: ThemeColors;
   lastSync?: string | null;
   lastSyncError?: string | null;
+  outboxCount: number;
   defaultCalendarId?: number | null;
   view: "dayGridMonth" | "timeGridWeek" | "timeGridDay" | "multiMonthYear";
   selected?: CalEvent | null;
@@ -198,6 +199,7 @@ export const useApp = create<Store>((set, get) => ({
   calendars: [],
   events: [],
   pending: [],
+  outboxCount: 0,
   defaultCalendarId: null,
   view: "timeGridWeek",
   selected: null,
@@ -223,6 +225,7 @@ export const useApp = create<Store>((set, get) => ({
         theme: ThemeColors;
         last_sync?: string | null;
         last_sync_error?: string | null;
+        outbox_count?: number;
         default_calendar_id?: number | null;
       }>("get_snapshot");
       applyThemeToDom(snap.theme);
@@ -235,6 +238,7 @@ export const useApp = create<Store>((set, get) => ({
         theme: snap.theme,
         lastSync: snap.last_sync,
         lastSyncError: snap.last_sync_error,
+        outboxCount: snap.outbox_count ?? 0,
         defaultCalendarId: snap.default_calendar_id ?? null,
         error: undefined,
         showSettings: snap.config.accounts.length === 0,

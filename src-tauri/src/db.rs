@@ -8,6 +8,22 @@ pub struct Db {
     conn: Mutex<Connection>,
 }
 
+/// A queued offline write awaiting replay against the CalDAV server.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // account_id/attempts/created_at kept for debugging & future UI
+pub struct OutboxRow {
+    pub id: i64,
+    pub calendar_id: i64,
+    pub account_id: String,
+    pub op: String, // "put" | "delete"
+    pub href: Option<String>,
+    pub uid: String,
+    pub raw_ics: Option<String>,
+    pub etag: Option<String>,
+    pub attempts: i64,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CalendarRow {
     pub id: i64,
@@ -168,6 +184,10 @@ impl Db {
         );
         let _ = conn.execute(
             "ALTER TABLE calendars ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE outbox ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
             [],
         );
         Ok(())
@@ -469,6 +489,16 @@ impl Db {
         Ok(())
     }
 
+    /// Update only the stored etag of an object row (used after outbox replay).
+    pub fn set_object_etag(&self, id: i64, etag: Option<&str>) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE objects SET etag = ?1 WHERE id = ?2",
+            params![etag, id],
+        )?;
+        Ok(())
+    }
+
     pub fn get_object(&self, id: i64) -> anyhow::Result<Option<EventRow>> {
         let conn = self.conn.lock().unwrap();
         let row = conn
@@ -637,6 +667,86 @@ impl Db {
         Ok(v)
     }
 
+    // ---- Outbox (durable offline write queue) -------------------------------
+
+    /// Queue (or replace) an operation for the given calendar/href.
+    /// A second queued op on the same (calendar_id, href, op) replaces the first,
+    /// so rapid offline edits collapse into one queued write.
+    pub fn enqueue_outbox(
+        &self,
+        calendar_id: i64,
+        op: &str,
+        href: &str,
+        uid: &str,
+        raw_ics: &str,
+        etag: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "DELETE FROM outbox WHERE calendar_id = ?1 AND href = ?2 AND op = ?3",
+            params![calendar_id, href, op],
+        )?;
+        conn.execute(
+            "INSERT INTO outbox(calendar_id, href, etag, uid, raw_ics, op, attempts, created_at)\n             VALUES(?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)",
+            params![calendar_id, href, etag, uid, raw_ics, op, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_outbox(&self) -> anyhow::Result<Vec<OutboxRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT o.id, o.calendar_id, c.account_id, o.op, o.href, o.uid, o.raw_ics, o.etag, o.attempts, o.created_at\n             FROM outbox o LEFT JOIN calendars c ON c.id = o.calendar_id\n             ORDER BY o.id ASC",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(OutboxRow {
+                    id: r.get(0)?,
+                    calendar_id: r.get(1)?,
+                    account_id: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    op: r.get(3)?,
+                    href: r.get(4)?,
+                    uid: r.get(5)?,
+                    raw_ics: r.get(6)?,
+                    etag: r.get(7)?,
+                    attempts: r.get::<_, Option<i64>>(8)?.unwrap_or(0),
+                    created_at: r.get(9)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn remove_outbox(&self, id: i64) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM outbox WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn bump_outbox_attempts(&self, id: i64, err: &str) -> anyhow::Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE outbox SET attempts = attempts + 1 WHERE id = ?1",
+            params![id],
+        )?;
+        let attempts: i64 = conn
+            .query_row(
+                "SELECT attempts FROM outbox WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        log::warn!("outbox replay failed (attempts={attempts}): {err}");
+        Ok(attempts)
+    }
+
+    pub fn count_outbox(&self) -> u64 {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row("SELECT COUNT(*) FROM outbox", [], |r| r.get::<_, i64>(0))
+            .unwrap_or(0) as u64
+    }
+
     pub fn mark_alarm_fired(&self, uid: &str, trigger_at: &str) -> anyhow::Result<bool> {
         let now = Utc::now().to_rfc3339();
         let conn = self.conn.lock().unwrap();
@@ -790,4 +900,33 @@ fn map_event_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
         alarms_json: r.get(16)?,
         my_partstat: r.get(17)?,
     })
+}
+
+#[cfg(test)]
+mod outbox_tests {
+    use super::*;
+
+    #[test]
+    fn enqueue_replaces_same_object_same_op() {
+        let dir = std::env::temp_dir().join(format!("omacal-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(&dir.join("t.db")).unwrap();
+        db.enqueue_outbox(1, "put", "/cal/a.ics", "uid-a", "ICS1", Some("\"e1\""))
+            .unwrap();
+        db.enqueue_outbox(1, "put", "/cal/a.ics", "uid-a", "ICS2", None)
+            .unwrap();
+        db.enqueue_outbox(1, "delete", "/cal/a.ics", "uid-a", "ICS1", None)
+            .unwrap();
+        let rows = db.list_outbox().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].op, "put");
+        assert_eq!(rows[0].raw_ics.as_deref(), Some("ICS2"));
+        assert!(rows[0].etag.is_none(), "latest etag replaces old");
+        assert_eq!(rows[0].attempts, 0);
+        assert_eq!(rows[1].op, "delete");
+        assert_eq!(db.count_outbox(), 2);
+        db.remove_outbox(rows[0].id).unwrap();
+        assert_eq!(db.count_outbox(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

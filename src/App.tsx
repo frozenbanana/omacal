@@ -137,6 +137,7 @@ export default function App() {
     error,
     lastSync,
     lastSyncError,
+    outboxCount,
     theme,
     config,
     defaultCalendarId,
@@ -979,6 +980,11 @@ export default function App() {
             {lastSync ? `Synced ${new Date(lastSync).toLocaleString()}` : "Never synced"}
           </div>
           {lastSyncError && <div className="error">{lastSyncError}</div>}
+          {outboxCount > 0 && (
+            <div className="muted" style={{ fontSize: "0.75rem" }} title="Changes made while offline will sync when the CalDAV server is reachable">
+              ⟳ {outboxCount} pending change{outboxCount === 1 ? "" : "s"} to sync
+            </div>
+          )}
         </div>
       </aside>
 
