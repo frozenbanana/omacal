@@ -3,6 +3,7 @@
   --bg: #2e3440;
   --fg: #d8dee9;
   --accent: #81a1c1;
+  --on-accent: #2e3440;
   --cursor: #d8dee9;
   --sel-fg: #2e3440;
   --sel-bg: #d8dee9;
@@ -48,7 +49,7 @@ textarea {
 
 input::placeholder,
 textarea::placeholder {
-  color: color-mix(in srgb, var(--fg) 60%, var(--bg));
+  color: var(--muted);
 }
 
 input:focus,
@@ -70,7 +71,7 @@ button {
 
 button.primary {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent);
   border-color: transparent;
   font-weight: 600;
 }
@@ -94,6 +95,14 @@ button:disabled {
   grid-template-columns: 280px 1fr;
   height: 100%;
   overflow: hidden;
+}
+
+.app.sidebar-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.sidebar[hidden] {
+  display: none;
 }
 
 .sidebar {
@@ -130,7 +139,7 @@ button:disabled {
 
 .sidebar-section h2 {
   margin: 0 0 0.55rem;
-  font-size: 0.7rem;
+  font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--muted);
@@ -196,7 +205,85 @@ button:disabled {
 }
 
 .cal-account-group {
-  margin-bottom: 0.55rem;
+  margin-bottom: 0.85rem;
+}
+
+.cal-hidden {
+  margin-top: 0.4rem;
+}
+
+.cal-hidden summary,
+.timezone-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 0.35rem 0;
+}
+
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.cal-hidden-hint {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin: 0.35rem 0;
+}
+
+.sidebar-status {
+  font-size: 0.8rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.timezone-details summary {
+  color: var(--fg);
+}
+
+.timezone-mode {
+  color: var(--muted);
+  font-size: 0.7rem;
+  margin-left: 0.65rem;
+}
+
+.timezone-settings {
+  padding: 0.5rem 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.timezone-settings label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+  color: var(--fg);
+}
+
+.timezone-settings p {
+  margin-bottom: 0;
+}
+
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+}
+
+.sync-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 auto;
+}
+
+.sync-dot.has-error {
+  background: var(--danger);
 }
 
 .cal-account-label {
@@ -283,15 +370,70 @@ button:disabled {
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.65rem 0.85rem;
+  gap: 0.65rem;
+  padding: 0.8rem 0.85rem;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 80%, black);
+  background: var(--bg);
 }
 
-.toolbar .spacer {
-  flex: 1;
+.sidebar-toggle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  min-height: 34px;
+}
+
+.date-navigation {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 1 1 290px;
+  min-width: 0;
+}
+
+.nav-heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+  padding-left: 0.35rem;
+}
+
+.week-label {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.toolbar-views,
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+}
+
+.toolbar-actions {
+  margin-left: auto;
+}
+
+@media (max-width: 900px) {
+  .app:not(.sidebar-collapsed) {
+    grid-template-columns: 230px minmax(0, 1fr);
+  }
+
+  .date-navigation {
+    flex-basis: calc(100% - 60px);
+  }
+
+  .toolbar {
+    gap: 0.5rem;
+  }
+
+  .toolbar-views {
+    flex-wrap: wrap;
+  }
 }
 
 .view-toggle {
@@ -309,7 +451,8 @@ button:disabled {
 
 .view-toggle button.active {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent);
+  font-weight: 600;
 }
 
 .calendar-wrap {
@@ -330,7 +473,8 @@ button:disabled {
   --fc-button-text-color: var(--fg);
   --fc-button-hover-bg-color: color-mix(in srgb, var(--fg) 10%, var(--bg));
   --fc-button-active-bg-color: var(--accent);
-  --fc-button-active-text-color: var(--bg);
+  --fc-button-active-text-color: var(--on-accent);
+  --fc-now-indicator-color: var(--accent);
   --fc-event-border-color: transparent;
   height: 100%;
   color: var(--fg);
@@ -343,12 +487,125 @@ button:disabled {
 
 .fc .fc-col-header-cell-cushion,
 .fc .fc-daygrid-day-number {
+  color: var(--fg);
+  font-weight: 600;
+  padding: 0.65rem 0.35rem;
+}
+
+.fc .fc-col-header-cell.fc-day-today .fc-col-header-cell-cushion {
+  color: var(--fg);
+  box-shadow: inset 0 -3px var(--accent);
+}
+
+.fc .fc-timegrid-slot-label-cushion {
   color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.fc .fc-timegrid-slot-minor {
+  border-top-color: color-mix(in srgb, var(--fg) 7%, var(--bg));
+  border-top-style: solid;
 }
 
 .fc-event {
-  border-radius: 4px;
-  font-size: 0.75rem;
+  border-radius: 5px;
+  font-size: 0.85rem;
+}
+
+.fc .fc-timegrid-event:not(.fc-invite),
+.fc .fc-daygrid-block-event:not(.fc-invite) {
+  border-width: 0 0 0 3px;
+}
+
+/* Narrow columns and short events must not leave interactive descendants
+   outside the painted card. This clips both rendering and pointer hit testing. */
+.fc .fc-timegrid-event,
+.fc .fc-daygrid-event {
+  overflow: hidden;
+}
+
+.fc .fc-event .fc-event-main {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.fc .fc-timegrid-event .fc-event-main {
+  padding: 4px 6px;
+}
+
+/* FullCalendar adds expanded selection/resize pseudo-element hit areas.
+   Keep decorative overlays inert and resizing within the visible event. */
+.fc .fc-event::before,
+.fc .fc-event::after,
+.fc .fc-event-resizer::before {
+  pointer-events: none;
+}
+
+.fc .fc-v-event.fc-event-start .fc-event-resizer-start {
+  top: 0;
+}
+
+.fc .fc-v-event.fc-event-end .fc-event-resizer-end {
+  bottom: 0;
+}
+
+.om-event-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  gap: 2px;
+  line-height: 1.35;
+}
+
+.om-event-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.om-event-time {
+  color: var(--event-secondary, inherit);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.om-event-compact {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.om-event-compact .om-event-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.om-event-compact .om-event-time {
+  flex: 0 1 auto;
+}
+
+.fc-event:hover {
+  outline: 1px solid currentColor;
+  outline-offset: -1px;
+}
+
+button:focus-visible,
+a:focus-visible,
+.fc-event:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.sidebar-section input[type="text"],
+.sidebar-section input:not([type]) {
+  width: 100%;
 }
 
 .fc .fc-event.om-marked {
@@ -686,7 +943,7 @@ button:disabled {
 }
 
 .muted {
-  color: color-mix(in srgb, var(--fg) 62%, var(--bg));
+  color: var(--muted);
 }
 
 .error {
@@ -722,18 +979,6 @@ button:disabled {
   font-weight: 700;
 }
 
-/* ---------------------------------------------------------------------------
- * Top navigation row (prev / next / title)
- * ------------------------------------------------------------------------- */
-.nav-row {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.5rem 0.85rem;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 80%, black);
-}
-
 .nav-btn {
   padding: 0.15rem 0.6rem;
   line-height: 1.2;
@@ -743,7 +988,6 @@ button:disabled {
 .nav-title {
   font-weight: 600;
   font-size: 1.02rem;
-  padding-left: 0.3rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -751,14 +995,11 @@ button:disabled {
 }
 
 .nav-notice {
-  margin-left: auto;
-  font-size: 0.7rem;
-  color: var(--accent);
+  font-size: 0.85rem;
+  color: var(--fg);
   background: color-mix(in srgb, var(--accent) 10%, var(--bg));
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  padding: 0.15rem 0.5rem;
-  border-radius: 999px;
-  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+  padding: 0.4rem 0.85rem;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1228,4 +1469,73 @@ button:disabled {
 .mm-span-end {
   border-top-right-radius: 2px;
   border-bottom-right-radius: 2px;
+}
+
+.event-context-menu {
+  position: fixed;
+  z-index: 600;
+  width: 270px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 8px 28px color-mix(in srgb, black 28%, transparent);
+}
+
+.context-menu-heading {
+  display: grid;
+  gap: 3px;
+  padding: 0.45rem 0.6rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.context-menu-heading strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-menu-heading > span {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.event-context-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 0.55rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.event-context-menu button:not(:disabled):hover,
+.event-context-menu button:focus-visible {
+  background: var(--panel);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.event-context-menu kbd {
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.context-menu-separator {
+  border-top: 1px solid var(--border);
+  margin: 0.3rem 0;
+}
+
+.event-context-menu .context-menu-danger {
+  color: var(--danger);
 }

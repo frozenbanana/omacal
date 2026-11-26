@@ -12,6 +12,10 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocaleConfig {
     pub timezone: String,
+    /// When true the UI displays times in the system (OS) timezone, like iOS
+    /// does when traveling. `timezone` remains the reference/home timezone.
+    #[serde(default)]
+    pub follow_system_tz: bool,
     pub time_24h: bool,
     pub week_starts_on: u8, // 0=Sun, 1=Mon
 }
@@ -33,6 +37,7 @@ impl Default for AppConfig {
         Self {
             locale: LocaleConfig {
                 timezone: "Europe/Stockholm".into(),
+                follow_system_tz: false,
                 time_24h: true,
                 week_starts_on: 1,
             },

@@ -14,6 +14,8 @@ type Props = {
   /** Already calendar-filtered events for this day (all-day + timed). */
   events: CalEvent[];
   time24h: boolean;
+  timezone?: string;
+  onEventContextMenu?: (event: CalEvent, x: number, y: number, trigger: HTMLElement) => void;
   anchor: DayPopoverAnchor;
   onClose: () => void;
   onSelectEvent: (ev: CalEvent) => void;
@@ -22,7 +24,16 @@ type Props = {
 const GAP = 6;
 const MARGIN = 8;
 
-export function DayPopover({ date, events, time24h, anchor, onClose, onSelectEvent }: Props) {
+export function DayPopover({
+  date,
+  events,
+  time24h,
+  timezone,
+  onEventContextMenu,
+  anchor,
+  onClose,
+  onSelectEvent,
+}: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
@@ -44,6 +55,7 @@ export function DayPopover({ date, events, time24h, anchor, onClose, onSelectEve
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (document.querySelector(".event-context-menu")) return;
       if (e.key === "Escape") {
         e.stopPropagation();
         onClose();
@@ -81,7 +93,7 @@ export function DayPopover({ date, events, time24h, anchor, onClose, onSelectEve
         <div className="day-popover-list" role="listbox">
           {events.length === 0 && <div className="day-popover-empty">No events</div>}
           {events.map((ev) => {
-            const time = eventTimeLabel(ev, time24h);
+            const time = eventTimeLabel(ev, time24h, timezone);
             const label = ev.all_day ? `${ev.title}` : `${time}, ${ev.title}`;
             return (
               <button
@@ -90,6 +102,24 @@ export function DayPopover({ date, events, time24h, anchor, onClose, onSelectEve
                 role="option"
                 className="day-popover-row"
                 title={label}
+                aria-haspopup={onEventContextMenu ? "menu" : undefined}
+                onContextMenu={(event) => {
+                  if (!onEventContextMenu) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onEventContextMenu(ev, event.clientX, event.clientY, event.currentTarget);
+                }}
+                onKeyDown={(event) => {
+                  if (
+                    !onEventContextMenu ||
+                    (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10"))
+                  )
+                    return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  onEventContextMenu(ev, rect.left, rect.bottom, event.currentTarget);
+                }}
                 onClick={() => onSelectEvent(ev)}
               >
                 <span

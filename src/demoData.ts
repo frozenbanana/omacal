@@ -180,7 +180,12 @@ export function buildMockSnapshot(): {
   ];
 
   const config: AppConfig = {
-    locale: { timezone: "Europe/Stockholm", time_24h: true, week_starts_on: 1 },
+    locale: {
+      timezone: "Europe/Stockholm",
+      follow_system_tz: false,
+      time_24h: true,
+      week_starts_on: 1,
+    },
     sync_interval_secs: 600,
     accounts: [
       {

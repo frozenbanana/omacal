@@ -15,7 +15,7 @@
         "title": "Omacal",
         "width": 1280,
         "height": 800,
-        "minWidth": 900,
+        "minWidth": 600,
         "minHeight": 600,
         "decorations": false,
         "backgroundColor": "#2e3440"

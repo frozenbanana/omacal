@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
+import { mixColor, readableColor } from "./themeColors";
 import { isTauri, mockInvoke } from "./demoData";
 
 async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -86,6 +87,7 @@ export type Account = {
 export type AppConfig = {
   locale: {
     timezone: string;
+    follow_system_tz: boolean;
     time_24h: boolean;
     week_starts_on: number;
   };
@@ -180,12 +182,16 @@ type Store = {
 function applyThemeToDom(t: ThemeColors) {
   const root = document.documentElement;
   root.style.setProperty("--bg", t.background);
-  root.style.setProperty("--fg", t.foreground);
+  root.style.setProperty("--fg", readableColor(t.foreground, t.background));
+  root.style.setProperty("--on-accent", readableColor(t.background, t.accent));
   root.style.setProperty("--accent", t.accent);
   root.style.setProperty("--cursor", t.cursor);
   root.style.setProperty("--sel-fg", t.selection_foreground);
   root.style.setProperty("--sel-bg", t.selection_background);
-  root.style.setProperty("--muted", t.muted);
+  root.style.setProperty(
+    "--muted",
+    readableColor(readableColor(t.muted, t.background), mixColor(t.foreground, t.background, 0.1))
+  );
   t.colors.forEach((c, i) => root.style.setProperty(`--color${i}`, c));
   root.dataset.theme = t.light ? "light" : "dark";
   document.documentElement.style.colorScheme = t.light ? "light" : "dark";
@@ -417,6 +423,11 @@ export async function respondInvitesBulk(eventIds: number[], partstat: string) {
   return safeInvoke<{ ok: number; failed: number; errors: string[] }>("respond_invites_bulk", {
     req: { event_ids: eventIds, partstat },
   });
+}
+
+export async function saveConfig(cfg: AppConfig) {
+  await safeInvoke("save_config", { cfg });
+  useApp.setState({ config: cfg });
 }
 
 export async function addAccount(payload: {

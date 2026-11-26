@@ -292,15 +292,16 @@ fn extract_dt_from_raw_with_tz(
     (None, false)
 }
 
-/// Extract wall (Naive) + TZID for a DTSTART/DTEND line from raw ICS.
+/// Extract wall (Naive) + TZID from the master VEVENT, never VTIMEZONE
+/// observances or detached recurrence overrides.
 /// Returns (wall_naive, tz_option, is_all_day)
 pub fn extract_wall_dt_and_tz(
     raw: &str,
     prop: &str,
 ) -> Option<(chrono::NaiveDateTime, Option<Tz>, bool)> {
-    for line in unfold(raw) {
+    for line in event_lines_from_calendar(raw, true).unwrap_or_default() {
         let upper = line.to_uppercase();
-        if !upper.starts_with(prop) {
+        if !upper.starts_with(&format!("{prop};")) && !upper.starts_with(&format!("{prop}:")) {
             continue;
         }
         if upper.contains("VALUE=DATE") {
@@ -1440,9 +1441,9 @@ pub fn expand_rrule_from_raw(
     let mut occ = if let Some((wall, tz, _)) = extract_wall_dt_and_tz(raw, "DTSTART") {
         // Only use wall path if raw contains TZID or is floating wall time
         // (i.e., we could reconstruct wall). For pure UTC (Z), keep UTC path.
-        let is_utc = raw
-            .lines()
-            .any(|l| l.to_uppercase().contains("DTSTART") && l.contains("Z"));
+        let is_utc = event_lines_from_calendar(raw, true)
+            .and_then(|lines| event_property(&lines, "DTSTART"))
+            .is_some_and(|value| value.ends_with('Z'));
         if tz.is_some() || !is_utc {
             expand_rrule_wall_tz(wall, tz, rrule, range_start, range_end)
         } else {
@@ -1925,6 +1926,71 @@ END:VCALENDAR\r\n";
         let overrides = parse_recurrence_overrides_with_tz(&raw, &[], None);
         assert_eq!(overrides[0].recurrence_id, "2026-09-21");
         assert_eq!(overrides[0].event.dtstart.as_deref(), Some("2026-09-23"));
+    }
+
+    #[test]
+    fn stockholm_work_series_keeps_wall_time_with_vtimezone_and_overrides() {
+        // Shape of a Nextcloud work calendar: timezone observances precede the
+        // events; an override may precede the master and may use UTC dates.
+        const ICS: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+BEGIN:VTIMEZONE\r\nTZID:Europe/Stockholm\r\n\
+BEGIN:DAYLIGHT\r\nDTSTART:19700329T020000\r\n\
+TZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\n\
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\nEND:DAYLIGHT\r\n\
+BEGIN:STANDARD\r\nDTSTART:19701025T030000\r\n\
+TZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\n\
+RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n\
+BEGIN:VEVENT\r\nUID:work-series\r\nRECURRENCE-ID:20260914T082500Z\r\n\
+DTSTART:20260914T082500Z\r\nDTEND:20260914T094500Z\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:work-series\r\n\
+DTSTART;TZID=Europe/Stockholm:20260817T102500\r\n\
+DTEND;TZID=Europe/Stockholm:20260817T114500\r\n\
+RRULE:FREQ=WEEKLY;BYDAY=MO;UNTIL=20270601T235959Z\r\n\
+END:VEVENT\r\nEND:VCALENDAR\r\n";
+        let tz = default_tz();
+        let parsed = parse_ics(ICS, &[]).unwrap();
+        assert_eq!(parsed.dtstart.as_deref(), Some("2026-08-17T08:25:00+00:00"));
+        let (wall, zone, _) = extract_wall_dt_and_tz(ICS, "DTSTART").unwrap();
+        assert_eq!(wall.to_string(), "2026-08-17 10:25:00");
+        assert_eq!(zone, Some(tz));
+        let (end, _, _) = extract_wall_dt_and_tz(ICS, "DTEND").unwrap();
+        assert_eq!(end.to_string(), "2026-08-17 11:45:00");
+        for (start, finish, expected) in [
+            (
+                "2026-08-17T00:00:00Z",
+                "2026-08-18T00:00:00Z",
+                "2026-08-17T08:25:00Z",
+            ),
+            (
+                "2026-11-23T00:00:00Z",
+                "2026-11-24T00:00:00Z",
+                "2026-11-23T09:25:00Z",
+            ),
+            (
+                "2027-04-05T00:00:00Z",
+                "2027-04-06T00:00:00Z",
+                "2027-04-05T08:25:00Z",
+            ),
+        ] {
+            let occurrences = expand_rrule_from_raw(
+                ICS,
+                parsed.dtstart.as_deref().unwrap(),
+                parsed.rrule.as_deref().unwrap(),
+                start.parse().unwrap(),
+                finish.parse().unwrap(),
+            );
+            assert_eq!(
+                occurrences,
+                vec![expected.parse::<DateTime<Utc>>().unwrap()]
+            );
+            assert_eq!(
+                occurrences[0]
+                    .with_timezone(&tz)
+                    .format("%H:%M")
+                    .to_string(),
+                "10:25"
+            );
+        }
     }
 
     #[test]

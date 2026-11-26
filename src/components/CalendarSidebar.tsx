@@ -113,6 +113,101 @@ export function CalendarSidebar() {
 
   const menuCal = menu ? calendars.find((c) => c.id === menu.calendarId) : null;
 
+  async function changeVisibility(c: Calendar, accountId: string, input: HTMLInputElement) {
+    const visible = input.checked;
+    const hadFocus = document.activeElement === input;
+    try {
+      await toggleCalendar(c.id, visible);
+      // Rows move between the visible list and a disclosure. Keep keyboard
+      // users on the moved row, or on its disclosure when hiding the row.
+      requestAnimationFrame(() => {
+        if (
+          !hadFocus ||
+          (document.activeElement !== document.body && document.activeElement !== input)
+        )
+          return;
+        if (visible) {
+          document.querySelector<HTMLInputElement>(`input[data-calendar-id="${c.id}"]`)?.focus();
+        } else {
+          const disclosure = [...document.querySelectorAll<HTMLDetailsElement>(".cal-hidden")].find(
+            (el) => el.dataset.accountId === accountId
+          );
+          disclosure?.querySelector<HTMLElement>("summary")?.focus();
+        }
+      });
+    } catch (error) {
+      useApp.setState({ error: String(error) });
+    }
+  }
+
+  function renderCalendar(c: Calendar, accountId: string) {
+    return (
+      <div
+        key={c.id}
+        className={[
+          "cal-row",
+          draggingId === c.id ? "dragging" : "",
+          dragOverId === c.id ? "drag-over" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        draggable
+        onDragStart={(e) => {
+          setDraggingId(c.id);
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", String(c.id));
+        }}
+        onDragEnd={() => {
+          setDraggingId(null);
+          setDragOverId(null);
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (dragOverId !== c.id) setDragOverId(c.id);
+        }}
+        onDragLeave={() => {
+          if (dragOverId === c.id) setDragOverId(null);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          void onDropReorder(accountId, c.id);
+        }}
+        onContextMenu={(e) => openMenu(e, c.id)}
+      >
+        <span className="cal-drag-handle" title="Drag to reorder" aria-hidden>
+          ⋮⋮
+        </span>
+        <input
+          type="checkbox"
+          checked={c.visible}
+          data-calendar-id={c.id}
+          onChange={(e) => void changeVisibility(c, accountId, e.currentTarget)}
+          aria-label={`Show ${c.displayname}`}
+          title="Show on calendar"
+        />
+        <span className="swatch" style={{ background: c.color }} />
+        <span className="cal-name" title={c.displayname}>
+          {c.displayname}
+          {c.readonly ? " 🔒" : ""}
+          {defaultCalendarId === c.id && (
+            <span className="cal-default-star" title="Default calendar">
+              {" "}
+              ★
+            </span>
+          )}
+        </span>
+        <button
+          type="button"
+          className="cal-menu-btn ghost"
+          aria-label={`Options for ${c.displayname}`}
+          onClick={(e) => openMenu(e, c.id)}
+        >
+          ⋮
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="sidebar-section calendar-sidebar" style={{ flex: 1, overflow: "auto" }}>
       <h2>Calendars</h2>
@@ -126,69 +221,14 @@ export function CalendarSidebar() {
             <div className="cal-account-label">{accountLabel(account, accountId)}</div>
           )}
 
-          {subscribed.map((c) => (
-            <div
-              key={c.id}
-              className={[
-                "cal-row",
-                draggingId === c.id ? "dragging" : "",
-                dragOverId === c.id ? "drag-over" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              draggable
-              onDragStart={(e) => {
-                setDraggingId(c.id);
-                e.dataTransfer.effectAllowed = "move";
-                e.dataTransfer.setData("text/plain", String(c.id));
-              }}
-              onDragEnd={() => {
-                setDraggingId(null);
-                setDragOverId(null);
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                if (dragOverId !== c.id) setDragOverId(c.id);
-              }}
-              onDragLeave={() => {
-                if (dragOverId === c.id) setDragOverId(null);
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                void onDropReorder(accountId, c.id);
-              }}
-              onContextMenu={(e) => openMenu(e, c.id)}
-            >
-              <span className="cal-drag-handle" title="Drag to reorder" aria-hidden>
-                ⋮⋮
-              </span>
-              <input
-                type="checkbox"
-                checked={c.visible}
-                onChange={(e) => toggleCalendar(c.id, e.target.checked)}
-                title="Show on calendar"
-              />
-              <span className="swatch" style={{ background: c.color }} />
-              <span className="cal-name">
-                {c.displayname}
-                {c.readonly ? " 🔒" : ""}
-                {defaultCalendarId === c.id ? (
-                  <span className="cal-default-star" title="Default calendar">
-                    {" "}
-                    ★
-                  </span>
-                ) : null}
-              </span>
-              <button
-                type="button"
-                className="cal-menu-btn ghost"
-                aria-label="Calendar options"
-                onClick={(e) => openMenu(e, c.id)}
-              >
-                ⋮
-              </button>
-            </div>
-          ))}
+          {subscribed.filter((c) => c.visible).map((c) => renderCalendar(c, accountId))}
+          {subscribed.some((c) => !c.visible) && (
+            <details className="cal-hidden" data-account-id={accountId}>
+              <summary>Not shown ({subscribed.filter((c) => !c.visible).length})</summary>
+              <p className="cal-hidden-hint">Still synced. Check a calendar to show its events.</p>
+              {subscribed.filter((c) => !c.visible).map((c) => renderCalendar(c, accountId))}
+            </details>
+          )}
         </div>
       ))}
 

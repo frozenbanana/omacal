@@ -17,12 +17,18 @@ import type {
 } from "@fullcalendar/core";
 import type { EventResizeDoneArg, DateClickArg } from "@fullcalendar/interaction";
 import "./App.css";
+import { eventPalette } from "./themeColors";
+import { readPreference, writePreference } from "./uiPreferences";
+import { ContextMenu } from "./components/ContextMenu";
+import { eventContextItems } from "./eventContextMenu";
+import { observeCalendarSize } from "./calendarResize";
 import {
   bootListeners,
   deleteEvent,
   deleteEventOccurrence,
   previewIcs,
   respondInvite,
+  saveConfig,
   saveEvent,
   saveEventOccurrence,
   takePendingImports,
@@ -79,21 +85,28 @@ function toDraftWallClock(d: Date, allDay: boolean, timeZone?: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
 }
 
-function toFcEvents(events: CalEvent[], marked: CalEvent | null): FCEventInput[] {
+function toFcEvents(
+  events: CalEvent[],
+  marked: CalEvent | null,
+  background = "#2e3440",
+  foreground = "#d8dee9"
+): FCEventInput[] {
   return events.flatMap((e) => {
     if (!e.start) return [];
     const invite = isInvite(e);
     const statusClass = partstatClass(e);
     const isMarked = marked != null && e.id === marked.id && e.start === marked.start;
     const isRecurringEvent = !!e.rrule;
+    const palette = eventPalette(e.color, background, foreground);
     const base: FCEventInput = {
       id: `${e.id}:${e.start}`,
       title: e.title || "(no title)",
       start: e.start,
       end: e.end || undefined,
       allDay: e.all_day,
-      backgroundColor: invite ? "transparent" : e.color,
-      borderColor: e.color,
+      backgroundColor: invite ? "transparent" : palette.surface,
+      borderColor: palette.edge,
+      textColor: palette.text,
       // v1: recurring series can be edited via dialog, not dragged (avoids BYDAY shift ambiguity)
       editable: !e.readonly && !invite && !isRecurringEvent,
       classNames: [
@@ -102,7 +115,7 @@ function toFcEvents(events: CalEvent[], marked: CalEvent | null): FCEventInput[]
         ...(isMarked ? ["om-marked"] : []),
         ...(isRecurringEvent ? ["om-recurring"] : []),
       ],
-      extendedProps: { calEvent: e, invite },
+      extendedProps: { calEvent: e, invite, palette },
     };
     return [base];
   });
@@ -143,7 +156,32 @@ export default function App() {
     defaultCalendarId,
   } = useApp();
 
+  // Display timezone: the home timezone from config, or the OS timezone when
+  // "follow system timezone" is enabled (iOS-style when traveling).
+  const systemTz = (() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+      return "";
+    }
+  })();
+  const followSystemTz = !!config?.locale.follow_system_tz && !!systemTz;
+  const displayTz = followSystemTz
+    ? (systemTz as string)
+    : config?.locale.timezone || "Europe/Stockholm";
   const calRef = useRef<FullCalendar | null>(null);
+  const calendarWrapRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const element = calendarWrapRef.current;
+    if (!ready || !element) return;
+    return observeCalendarSize(element, () => calRef.current?.getApi().updateSize());
+  }, [ready]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+    readPreference("sidebar-collapsed")
+  );
+  useEffect(() => {
+    writePreference("sidebar-collapsed", sidebarCollapsed);
+  }, [sidebarCollapsed]);
   const [rsvpBusyId, setRsvpBusyId] = useState<number | null>(null);
   const [navTitle, setNavTitle] = useState("");
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
@@ -152,6 +190,15 @@ export default function App() {
     events: CalEvent[];
     anchor: DayPopoverAnchor;
   } | null>(null);
+  const [eventMenu, setEventMenu] = useState<{
+    event: CalEvent;
+    x: number;
+    y: number;
+    trigger: HTMLElement;
+  } | null>(null);
+  useEffect(() => {
+    setEventMenu(null);
+  }, [events, view, displayTz, showEditor, showSettings]);
   const [marked, setMarked] = useState<CalEvent | null>(null);
   const [clipboard, setClipboard] = useState<CalEvent | null>(null);
   const [lastClickedDay, setLastClickedDay] = useState<Date | null>(null);
@@ -289,7 +336,10 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingImport]);
 
-  const fcEvents = useMemo(() => toFcEvents(events, marked), [events, marked]);
+  const fcEvents = useMemo(
+    () => toFcEvents(events, marked, theme?.background, theme?.foreground),
+    [events, marked, theme]
+  );
 
   const visibleEvents = useMemo(() => {
     const visibleIds = new Set(
@@ -302,7 +352,7 @@ export default function App() {
     const onKey = (ev: KeyboardEvent) => {
       const tag = (ev.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (showEditor || showSettings) return;
+      if (showEditor || showSettings || document.querySelector(".event-context-menu")) return;
       if (ev.key === "n") {
         ev.preventDefault();
         openNew();
@@ -488,6 +538,11 @@ export default function App() {
     const busy = calEvent != null && rsvpBusyId === calEvent.id;
     const isMonthGrid = arg.view.type === "dayGridMonth";
     const title = arg.event.title || "(no title)";
+    const compact = !!(
+      arg.event.start &&
+      arg.event.end &&
+      arg.event.end.getTime() - arg.event.start.getTime() <= 30 * 60 * 1000
+    );
 
     if (isMonthGrid && calEvent && !invite && !arg.event.allDay) {
       const label = `${arg.timeText ? arg.timeText + ", " : ""}${title}`;
@@ -526,11 +581,18 @@ export default function App() {
 
     if (!invite || !calEvent) {
       return (
-        <div className="fc-event-main-frame">
-          {arg.timeText && <div className="fc-event-time">{arg.timeText}</div>}
-          <div className="fc-event-title-container">
-            <div className="fc-event-title fc-sticky">{title}</div>
-          </div>
+        <div
+          className={`om-event-content${compact ? " om-event-compact" : ""}`}
+          style={{
+            ["--event-secondary" as string]: arg.event.extendedProps.palette?.secondary,
+          }}
+        >
+          <div className="om-event-title">{title}</div>
+          {arg.timeText && (
+            <div className="om-event-time">
+              {compact ? arg.timeText.replace(/\s*[–-].*$/, "") : arg.timeText}
+            </div>
+          )}
         </div>
       );
     }
@@ -622,7 +684,7 @@ export default function App() {
     setEditorTitle(undefined);
     setRecurrenceEditScope(undefined);
     setEditingOccurrence(null);
-    const tz = config?.locale.timezone || "Europe/Stockholm";
+    const tz = displayTz;
     setEditorDraft({
       calendar_id: firstWritable.id,
       summary: "",
@@ -636,6 +698,78 @@ export default function App() {
       attendees: [],
     });
     setShowEditor(true);
+  }
+
+  function closeEventMenu(restoreFocus = false) {
+    if (restoreFocus && eventMenu?.trigger.isConnected) eventMenu.trigger.focus();
+    setEventMenu(null);
+  }
+
+  function openEventMenu(ev: CalEvent, x: number, y: number, trigger: HTMLElement) {
+    if (showEditor || showSettings || pendingDelete || pendingRecurrenceEdit) return;
+    setMarked(ev);
+    setSelected(null);
+    setEventMenu({ event: ev, x, y, trigger });
+  }
+
+  function calendarContextMenu(event: React.MouseEvent<HTMLDivElement>) {
+    const element = (event.target as HTMLElement).closest<HTMLElement>("[data-event-id]");
+    const ev = events.find((item) => `${item.id}:${item.start}` === element?.dataset.eventId);
+    if (!element || !ev) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openEventMenu(ev, event.clientX, event.clientY, element);
+  }
+
+  function calendarMenuKey(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+    const element = (event.target as HTMLElement).closest<HTMLElement>("[data-event-id]");
+    const ev = events.find((item) => `${item.id}:${item.start}` === element?.dataset.eventId);
+    if (!element || !ev) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = element.getBoundingClientRect();
+    openEventMenu(ev, rect.left, rect.bottom, element);
+  }
+
+  function runEventAction(action: string) {
+    if (!eventMenu) return;
+    const ev = eventMenu.event;
+    closeEventMenu(action === "copy");
+    if (action !== "copy") setDayPopover(null);
+    if (action === "details") setSelected(ev);
+    if (action === "copy") {
+      setClipboard(ev);
+      showNotice("Copied");
+    }
+    if (action === "edit" && !ev.readonly) openEdit(ev);
+    if (action === "edit-single" && !ev.readonly && ev.recurrence_id) openEdit(ev, "single");
+    if (action === "edit-series" && !ev.readonly) openEdit(ev, "series");
+    if (action === "delete" && !ev.readonly) requestDelete(ev);
+    if (action === "duplicate") {
+      const target =
+        calendars.find((c) => c.id === ev.calendar_id && !c.readonly && c.subscribed !== false) ??
+        calendars.find((c) => !c.readonly && c.subscribed !== false);
+      if (!target) return;
+      setSelected(null);
+      setRecurrenceEditScope(undefined);
+      setEditingOccurrence(null);
+      setEditorTitle("Duplicate event");
+      setEditorDraft({
+        calendar_id: target.id,
+        summary: ev.title,
+        description: ev.description,
+        location: ev.location,
+        dtstart: ev.start || "",
+        dtend: ev.end || ev.start || "",
+        all_day: ev.all_day,
+        timezone: displayTz,
+        rrule: null,
+        alarms: ev.alarms,
+        attendees: [],
+      });
+      setShowEditor(true);
+    }
   }
 
   function openEdit(ev: CalEvent, scope?: "single" | "series") {
@@ -669,7 +803,7 @@ export default function App() {
       dtstart: (useMaster ? (master?.start ?? ev.master_start) : ev.start) || ev.start || "",
       dtend: (useMaster ? (master?.end ?? ev.master_end) : ev.end) || ev.end || ev.start || "",
       all_day: master?.all_day ?? ev.all_day,
-      timezone: config?.locale.timezone || "Europe/Stockholm",
+      timezone: displayTz,
       rrule: master?.rrule ?? ev.rrule,
       alarms: master?.alarms ?? ev.alarms,
       attendees: master?.attendees ?? ev.attendees,
@@ -708,7 +842,7 @@ export default function App() {
       dtstart: preview.dtstart || "",
       dtend: preview.dtend || preview.dtstart || "",
       all_day: preview.all_day,
-      timezone: s.config?.locale.timezone || "Europe/Stockholm",
+      timezone: displayTz,
       rrule: preview.rrule || null,
       alarms: preview.alarms?.length ? preview.alarms : [{ trigger: "-PT15M" }],
       attendees: preview.attendees || [],
@@ -771,7 +905,7 @@ export default function App() {
     }
     try {
       const baseUid = ev.uid.includes("::") ? ev.uid.split("::")[0] : ev.uid;
-      const tz = config?.locale.timezone || "Europe/Stockholm";
+      const tz = displayTz;
       await saveEvent({
         calendar_id: ev.calendar_id,
         uid: baseUid,
@@ -809,7 +943,7 @@ export default function App() {
       throw new Error("no paste target date");
     }
 
-    const tz = config?.locale.timezone || "Europe/Stockholm";
+    const tz = displayTz;
     const sStart = new Date(src.start || "");
     if (Number.isNaN(sStart.getTime())) {
       throw new Error("copied event has no start time");
@@ -871,16 +1005,21 @@ export default function App() {
     const ev = info.event.extendedProps.calEvent as CalEvent | undefined;
     if (!ev) return;
     const is24h = config?.locale.time_24h ?? true;
-    const tz = config?.locale.timezone || "Europe/Stockholm";
+    const tz = displayTz;
     info.el.setAttribute(
       "aria-label",
       ev.all_day ? ev.title : `${eventTimeLabel(ev, is24h, tz)}, ${ev.title}`
     );
     info.el.setAttribute("data-event-id", `${ev.id}:${ev.start}`);
-    // Title hint for discoverability
-    if (!info.el.getAttribute("title")) {
-      info.el.setAttribute("title", "Double-click to edit");
-    }
+    info.el.tabIndex = 0;
+    info.el.setAttribute("aria-haspopup", "menu");
+    const calendarName = calendars.find((c) => c.id === ev.calendar_id)?.displayname;
+    info.el.setAttribute(
+      "title",
+      [ev.title, ev.all_day ? "All day" : eventTimeLabel(ev, is24h, tz), calendarName, ev.location]
+        .filter(Boolean)
+        .join("\n")
+    );
   }
 
   function openDayPopover(arg: MoreLinkArg) {
@@ -889,7 +1028,7 @@ export default function App() {
     const anchor: DayPopoverAnchor = r
       ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
       : { left: 0, top: 0, right: 0, bottom: 0 };
-    const tz = config?.locale.timezone || "Europe/Stockholm";
+    const tz = displayTz;
     const key = dayKey(arg.date, tz);
     const timed = getTimedEventsForDayKey(visibleEvents, key, tz)
       .slice()
@@ -909,37 +1048,22 @@ export default function App() {
     calRef.current?.getApi().next();
   }
 
-  const systemTz = (() => {
-    try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone;
-    } catch {
-      return "";
-    }
-  })();
-  const tzMismatch = !!config && !!systemTz && systemTz !== config.locale.timezone;
-
   if (!ready) {
     // Splash (pulsating calendar icon) is shown in index.html until ready.
     return null;
   }
 
   return (
-    <div className="app">
-      <aside className="sidebar">
+    <div className={`app${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
+      <aside
+        className="sidebar"
+        id="calendar-sidebar"
+        hidden={sidebarCollapsed}
+        aria-label="Calendars and search"
+      >
         <div className="brand" data-tauri-drag-region="deep">
           <h1>Omacal</h1>
-          <p>
-            {theme?.name || "omarchy"} · {config?.locale.timezone || "UTC"}
-            {tzMismatch && (
-              <span
-                title={`System timezone ${systemTz} differs from calendar timezone ${config?.locale.timezone}. Times are shown in ${config?.locale.timezone}.`}
-                style={{ color: "var(--muted)", fontSize: "0.7em" }}
-              >
-                {" "}
-                · system {systemTz}
-              </span>
-            )}
-          </p>
+          <p title={`Following the ${theme?.name || "Omarchy"} theme`}>Calendar</p>
         </div>
 
         <div className="sidebar-section">
@@ -975,13 +1099,57 @@ export default function App() {
 
         <InvitesPanel />
 
-        <div className="sidebar-section">
-          <div className="muted" style={{ fontSize: "0.75rem" }}>
-            {lastSync ? `Synced ${new Date(lastSync).toLocaleString()}` : "Never synced"}
+        <div className="sidebar-section sidebar-status">
+          <details className="timezone-details">
+            <summary title="Calendar timezone and travel settings">
+              <span>{displayTz.split("/").pop()?.replace(/_/g, " ")}</span>
+              <span className="timezone-mode">{followSystemTz ? "System time" : "Home time"}</span>
+            </summary>
+            <div className="timezone-settings">
+              <div>Calendar: {config?.locale.timezone}</div>
+              <div>System: {systemTz || "Unavailable"}</div>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={followSystemTz}
+                  disabled={!config || !systemTz}
+                  onChange={(e) => {
+                    if (!config) return;
+                    void saveConfig({
+                      ...config,
+                      locale: { ...config.locale, follow_system_tz: e.target.checked },
+                    });
+                  }}
+                />
+                Follow system timezone
+              </label>
+              <p>Events are shown in {displayTz}. Their saved times are not changed.</p>
+            </div>
+          </details>
+          <div
+            className="sync-status"
+            title={
+              lastSync
+                ? `Last synced ${new Date(lastSync).toLocaleString()}`
+                : "No successful sync yet"
+            }
+          >
+            <span className={`sync-dot${lastSyncError ? " has-error" : ""}`} aria-hidden="true" />
+            {syncing
+              ? "Syncing…"
+              : lastSyncError
+                ? "Sync needs attention"
+                : lastSync
+                  ? "Last sync successful"
+                  : "Not synced yet"}
           </div>
           {lastSyncError && <div className="error">{lastSyncError}</div>}
           {outboxCount > 0 && (
-            <div className="muted" style={{ fontSize: "0.75rem" }} title="Changes made while offline will sync when the CalDAV server is reachable">
+            <div
+              className="muted"
+              style={{ fontSize: "0.75rem" }}
+              title="Changes made while offline will sync when the CalDAV server is reachable"
+            >
               ⟳ {outboxCount} pending change{outboxCount === 1 ? "" : "s"} to sync
             </div>
           )}
@@ -989,65 +1157,111 @@ export default function App() {
       </aside>
 
       <main className="main">
-        <div className="nav-row" data-tauri-drag-region="deep">
+        <header className="toolbar" data-tauri-drag-region="deep">
           <button
             type="button"
-            className="ghost nav-btn"
-            onClick={navPrev}
-            aria-label="Previous"
-            title="Previous"
+            className="ghost sidebar-toggle"
+            aria-label={
+              sidebarCollapsed ? "Show calendars and search" : "Hide calendars and search"
+            }
+            aria-expanded={!sidebarCollapsed}
+            aria-controls="calendar-sidebar"
+            title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
           >
-            ‹
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <rect
+                x="2"
+                y="3"
+                width="16"
+                height="14"
+                rx="2"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+              <path d="M7 3v14" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
           </button>
-          <button
-            type="button"
-            className="ghost nav-btn"
-            onClick={navNext}
-            aria-label="Next"
-            title="Next"
-          >
-            ›
-          </button>
-          <span className="nav-title">{navTitle}</span>
-          {notice && <span className="nav-notice">{notice}</span>}
-        </div>
-        <div className="toolbar" data-tauri-drag-region="deep">
-          <div className="view-toggle">
-            {(
-              [
-                ["timeGridDay", "Day"],
-                ["timeGridWeek", "Week"],
-                ["dayGridMonth", "Month"],
-                ["multiMonthYear", "Year"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                className={view === id ? "active" : ""}
-                onClick={() => {
-                  setView(id);
-                  calRef.current?.getApi().changeView(id);
-                }}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="date-navigation">
+            <button
+              type="button"
+              className="ghost nav-btn"
+              onClick={navPrev}
+              aria-label="Previous"
+              title="Previous"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              className="ghost nav-btn"
+              onClick={navNext}
+              aria-label="Next"
+              title="Next"
+            >
+              ›
+            </button>
+            <div className="nav-heading">
+              <span className="nav-title">{navTitle}</span>
+              {view === "timeGridWeek" && (
+                <span className="week-label">
+                  Week {DateTime.fromJSDate(currentDate, { zone: displayTz }).weekNumber}
+                </span>
+              )}
+            </div>
           </div>
-          <button className="ghost" onClick={() => calRef.current?.getApi().today()}>
-            Today
-          </button>
-          <button className="primary" onClick={() => openNew()}>
-            New event
-          </button>
-          <div className="spacer" />
-          <button onClick={() => sync()} disabled={syncing}>
-            {syncing ? "Syncing…" : "Sync"}
-          </button>
-          <button onClick={() => setShowSettings(true)}>Accounts</button>
-        </div>
+          <div className="toolbar-views">
+            <div className="view-toggle">
+              {(
+                [
+                  ["timeGridDay", "Day"],
+                  ["timeGridWeek", "Week"],
+                  ["dayGridMonth", "Month"],
+                  ["multiMonthYear", "Year"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  className={view === id ? "active" : ""}
+                  aria-pressed={view === id}
+                  onClick={() => {
+                    setView(id);
+                    calRef.current?.getApi().changeView(id);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button className="ghost" onClick={() => calRef.current?.getApi().today()}>
+              Today
+            </button>
+          </div>
+          <div className="toolbar-actions">
+            <button className="primary" onClick={() => openNew()}>
+              New event
+            </button>
+            <button className="ghost" onClick={() => sync()} disabled={syncing}>
+              {syncing ? "Syncing…" : "Sync"}
+            </button>
+            <button className="ghost" onClick={() => setShowSettings(true)}>
+              Accounts
+            </button>
+          </div>
+        </header>
+        {notice && (
+          <div className="nav-notice" role="status">
+            {notice}
+          </div>
+        )}
         {error && <div className="error">{error}</div>}
         {importError && <div className="error">{importError}</div>}
-        <div className="calendar-wrap">
+        <div
+          className="calendar-wrap"
+          ref={calendarWrapRef}
+          onContextMenu={calendarContextMenu}
+          onKeyDown={calendarMenuKey}
+        >
           <FullCalendar
             ref={calRef}
             plugins={[
@@ -1057,7 +1271,7 @@ export default function App() {
               interactionPlugin,
               luxonPlugin,
             ]}
-            timeZone={config?.locale.timezone || "Europe/Stockholm"}
+            timeZone={displayTz}
             initialView={view}
             headerToolbar={false}
             height="100%"
@@ -1072,10 +1286,17 @@ export default function App() {
             slotMaxTime="24:00:00"
             slotDuration="00:30:00"
             slotLabelInterval="01:00:00"
+            slotLabelFormat={{
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: !(config?.locale.time_24h ?? true),
+            }}
+            slotEventOverlap={false}
             scrollTime="08:00:00"
             expandRows
             views={{
               timeGridWeek: {
+                titleFormat: { year: "numeric", month: "long", day: "numeric" },
                 weekNumbers: true,
                 weekNumberCalculation: "ISO",
                 weekNumberFormat: { week: "numeric" },
@@ -1098,7 +1319,7 @@ export default function App() {
             eventDidMount={handleEventMount}
             dayCellClassNames={(arg: { date: Date }) => {
               if (!lastClickedDay || !arg.date) return [];
-              const tz = config?.locale.timezone || "Europe/Stockholm";
+              const tz = displayTz;
               const a = DateTime.fromJSDate(arg.date, { zone: tz }).startOf("day");
               const b = DateTime.fromJSDate(lastClickedDay, { zone: tz }).startOf("day");
               return a.hasSame(b, "day") ? ["om-paste-anchor"] : [];
@@ -1106,12 +1327,13 @@ export default function App() {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             slotLaneClassNames={(arg: any) => {
               if (!lastClickedDay || !arg.date) return [];
-              const tz = config?.locale.timezone || "Europe/Stockholm";
+              const tz = displayTz;
               const a = DateTime.fromJSDate(arg.date as Date, { zone: tz }).startOf("day");
               const b = DateTime.fromJSDate(lastClickedDay, { zone: tz }).startOf("day");
               return a.hasSame(b, "day") ? ["om-paste-anchor"] : [];
             }}
             datesSet={(info) => {
+              setEventMenu(null);
               setNavTitle(info.view.title);
               setCurrentDate(info.start);
             }}
@@ -1137,6 +1359,7 @@ export default function App() {
       {selected && !showEditor && (
         <EventDetail
           event={selected}
+          timeZone={displayTz}
           onClose={() => setSelected(null)}
           onEdit={() => openEdit(selected)}
           onDelete={async () => {
@@ -1160,6 +1383,8 @@ export default function App() {
           date={dayPopover.date}
           events={dayPopover.events}
           time24h={config?.locale.time_24h ?? true}
+          timezone={displayTz}
+          onEventContextMenu={openEventMenu}
           anchor={dayPopover.anchor}
           onClose={() => setDayPopover(null)}
           onSelectEvent={(ev) => {
@@ -1177,7 +1402,7 @@ export default function App() {
         <EventEditor
           draft={editorDraft}
           calendars={calendars.filter((c) => c.subscribed !== false)}
-          timezone={config?.locale.timezone || "Europe/Stockholm"}
+          timezone={displayTz}
           title={editorTitle}
           recurrenceEditScope={recurrenceEditScope}
           onClose={() => setShowEditor(false)}
@@ -1210,6 +1435,24 @@ export default function App() {
         />
       )}
 
+      {eventMenu && (
+        <ContextMenu
+          x={eventMenu.x}
+          y={eventMenu.y}
+          title={eventMenu.event.title || "(no title)"}
+          subtitle={
+            eventMenu.event.readonly
+              ? "Read-only calendar"
+              : eventTimeLabel(eventMenu.event, config?.locale.time_24h ?? true, displayTz)
+          }
+          items={eventContextItems(
+            eventMenu.event,
+            calendars.some((c) => !c.readonly && c.subscribed !== false)
+          )}
+          onAction={runEventAction}
+          onClose={closeEventMenu}
+        />
+      )}
       {pendingRecurrenceEdit && (
         <ConfirmRecurrenceEdit
           title={pendingRecurrenceEdit.title}

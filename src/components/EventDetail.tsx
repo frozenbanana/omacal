@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { DateTime } from "luxon";
-import { useApp } from "../store";
 import type { CalEvent } from "../store";
 import { humanize, parseRRule } from "./RepeatBuilder";
 
 type Props = {
   event: CalEvent;
+  timeZone: string;
   onClose: () => void;
   onEdit: () => void;
   onDelete: () => Promise<void>;
@@ -33,12 +33,12 @@ function rsvpLabel(partstat?: string | null): string {
   }
 }
 
-export function EventDetail({ event, onClose, onEdit, onDelete, onRsvp }: Props) {
+export function EventDetail({ event, timeZone, onClose, onEdit, onDelete, onRsvp }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const current = (event.my_partstat || "").toUpperCase();
   const canRsvp = !!event.my_partstat;
-  const tz = useApp((s) => s.config?.locale.timezone) || "Europe/Stockholm";
+  const tz = timeZone;
 
   async function changeRsvp(partstat: string) {
     if (busy || partstat === current) return;
